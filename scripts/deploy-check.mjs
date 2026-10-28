@@ -1,15 +1,18 @@
-import { readFileSync,existsSync } from 'node:fs';
-const configPath=process.env.HIRO_DEPLOY_CONFIG || 'wrangler.production.json';
-if(!existsSync(configPath))throw new Error('公開設定が未作成。READMEの本人認証・無料プラン確認を先に完了する。');
-const c=JSON.parse(readFileSync(configPath,'utf8'));
-if(!c.d1_databases?.[0]?.database_id||c.d1_databases[0].database_id.startsWith('00000000'))throw new Error('専用D1のIDが必要。');
-if(c.assets?.run_worker_first!==true||c.preview_urls!==false||c.workers_dev!==false)throw new Error('認証経由の専用routeとpreview無効化が必要。');
-if(c.vars?.LOCAL_DEV)throw new Error('本番ではLOCAL_DEVを設定できない。');
-const file='.wrangler/deployment-verification.json';
-if(!existsSync(file))throw new Error('Access/本人ポリシー/無料プラン確認記録が必要。READMEを参照。');
-const v=JSON.parse(readFileSync(file,'utf8'));
-const age=Date.now()-Date.parse(v.checkedAt);
-if(v.freePlan!==true||v.accessAppVerified!==true||v.ownerOnlyPolicy!==true||v.productionHost!==c.routes?.[0]?.pattern||age>86400000||age < -300000||!Number.isFinite(age))
-  throw new Error('24時間以内に確認した無料プラン・Access対象URL・本人のみの許可ポリシーが必要。');
-if(!c.vars?.ACCESS_TEAM_DOMAIN||!c.vars?.ACCESS_AUD||!v.authSecretsVerified)throw new Error('本番認証の設定とOWNER_EMAIL secret確認が必要。公開Gitへメールや秘密を保存しない。');
-console.log('Deployment preflight passed; authentication at the deployed URL still requires verification.');
+import { readFileSync } from 'node:fs';
+import { validateDeployment } from './deployment-policy.mjs';
+
+const mode = process.env.HIRO_DEPLOY_MODE || 'production';
+try {
+  const args = process.argv.slice(2);
+  if (args.length && (args.length !== 2 || args[0] !== '--config' || !args[1])) throw new Error('設定ファイルは --config で1つだけ指定してください。');
+  if (process.env.CLOUDFLARE_ENV) throw new Error('CLOUDFLARE_ENVによる環境切替は使用できません。');
+  const configPath = args[1] || process.env.HIRO_DEPLOY_CONFIG || 'wrangler.production.json';
+  const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  const proof = JSON.parse(readFileSync('.wrangler/deployment-verification.json', 'utf8'));
+  validateDeployment(config, proof, { now: Date.now(), mode });
+  console.log('設定と確認記録の検査に合格。公開先の実際の認証は別途確認が必要。');
+} catch (error) {
+  const message = error instanceof SyntaxError ? '設定または確認記録のJSONを読み取れません。' : error?.code ? '設定または確認記録を読み取れません。' : error.message;
+  console.error(`デプロイ前の確認に失敗: ${message}`);
+  process.exitCode = 1;
+}

@@ -11,3 +11,7 @@ Ruling: backups capped at10MiB/50k rows including export — prevent unusable ex
 Ruling: backup v1 pins scheduler v1 verifier — future scheduling models need a versioned verifier to preserve historic import support.
 Independent review: fixed atomic snapshot exports, self-restore limits, invented schedule chains, concurrent edit loss, concurrent import races, CSV free quota risk. Added bounded dashboard aggregates and literal long Japanese search.
 Task7: documentation and review complete. Delivery branch is `feature/hiro-knowledge`; the final response records the saved commit and remote verification result.
+
+Continuation 2026-10-29: user completed scoped OAuth re-login; actual D1 list now succeeds. Existing DB unchanged. Access organizations/apps and subscriptions API read403. Windows browser automation stopped because current URL could not be confirmed; no alternate UI method used. Free plan and Access remain unverified, so no new remote DB or public endpoint yet.
+Implemented deployment policy bootstrap/production validation, worker-level Access + workers.dev host/Worker ID binding, singular route rejection and focused regression tests. See docs/cloud-deployment.md for revised no-domain-purchase sequence.
+Independent deployment review found config-file and named-environment selection bypasses; fixed with explicit same-config validation/deploy and rejection of env/CLOUDFLARE_ENV. Review confirmed closed. Final full suite49/49, syntax/routing checks and Worker dry-run passed. No production or actual-device claims added.

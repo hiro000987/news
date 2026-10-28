@@ -10,7 +10,7 @@
     "test:e2e": "node tests/e2e.mjs",
     "check": "node scripts/check.mjs",
     "deploy:check": "node scripts/deploy-check.mjs",
-    "deploy": "node scripts/deploy-check.mjs && wrangler deploy --config wrangler.production.json"
+    "deploy": "node scripts/deploy-check.mjs --config wrangler.production.json && wrangler deploy --config wrangler.production.json"
   },
   "dependencies": {
     "jose": "6.2.13"
