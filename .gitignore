@@ -1,0 +1,11 @@
+node_modules/
+.wrangler/
+.dev.vars
+.env*
+!.env.example
+test-results/
+playwright-report/
+artifacts/
+.superpowers/
+*.log
+wrangler.production.json

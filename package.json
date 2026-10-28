@@ -1,0 +1,23 @@
+{
+  "name": "hiro-knowledge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --ip 127.0.0.1 --port 8787 --persist-to .wrangler/state",
+    "db:local": "wrangler d1 migrations apply hiro-knowledge --local --persist-to .wrangler/state",
+    "test": "node --test tests/*.test.js",
+    "test:e2e": "node tests/e2e.mjs",
+    "check": "node scripts/check.mjs",
+    "deploy:check": "node scripts/deploy-check.mjs",
+    "deploy": "node scripts/deploy-check.mjs && wrangler deploy --config wrangler.production.json"
+  },
+  "dependencies": {
+    "jose": "6.2.13"
+  },
+  "devDependencies": {
+    "miniflare": "4.20260730.0",
+    "playwright": "1.64.1",
+    "wrangler": "4.153.0"
+  }
+}
