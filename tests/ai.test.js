@@ -4,118 +4,82 @@ import {handleApi} from '../src/api.js';
 import {validateKnowledge} from '../src/validation.js';
 import {TABLES} from '../src/backup.js';
 import {fixture} from './d1-fixture.js';
-
 const model='@cf/qwen/qwen3-30b-a3b-fp8';
-const draft={title:'想起練習',content:'学んだ内容を見ずに思い出す練習。',category:'学習',tags:['記憶'],quizzes:[{type:'recall',prompt:'想起練習とは？',answer:'内容を見ずに思い出す練習。',explanation:'繰り返して確かめる。'}]};
-const output=(candidates=[draft])=>({choices:[{message:{content:JSON.stringify({candidates})},finish_reason:'stop'}]});
-const input={mode:'topic',topic:'想起練習',count:1};
-function client(DB,AI){return async(path='generate',body=input)=>{
- const response=await handleApi(new Request('https://example.test/api/ai/'+path,{method:path==='status'?'GET':'POST',...(path==='status'?{}:{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})}),{DB,AI});
- return {status:response.status,data:await response.json()};
-};}
+const draft={title:'想起練習',content:'学んだ内容を見ずに思い出す練習。',category:'学習',tags:['記憶'],quizzes:[{type:'recall',prompt:'想起練習とは？',answer:'内容を見ずに思い出す練習。',explanation:'繰り返して確かめる。'},{type:'choice',prompt:'想起練習に当たるのは？',answer:'何も見ずに思い出す',explanation:'記憶から取り出す。',options:['何も見ずに思い出す','教科書を読む','答えを書き写す'],correctIndex:0}]};
+const copy=value=>structuredClone(value),output=(candidates=[draft])=>({choices:[{message:{content:JSON.stringify({candidates})},finish_reason:'stop'}]}),input={mode:'topic',topic:'想起練習',count:1};
+const LEVEL_CASES={intermediate:{situation:'学習した内容を翌日の試験で使うため、答えを隠して自分で説明する場面。'},advanced:{situation:'短い復習時間で複数の分野を学び直し、説明できる内容を増やしたい場面。',constraint:'復習に使える時間は毎日十分だけで、問題を見直す資料も一冊に限られる。'},expert:{claim:'説明を読んで意味が分かれば、翌日も何も見ずに同じ内容を説明できるという主張。',counterexample:'説明を読んだ直後は理解できたが、翌日に資料を閉じると説明を思い出せない例。'}};
+const atLevel=(card,level)=>({...copy(card),quizzes:card.quizzes.map(q=>({...copy(q),...(LEVEL_CASES[level]?{case:copy(LEVEL_CASES[level])}:{})}))});
+function client(DB,AI){return async(path='generate',body=input)=>{const response=await handleApi(new Request('https://example.test/api/ai/'+path,{method:path==='status'?'GET':'POST',...(path==='status'?{}:{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})}),{DB,AI});return {status:response.status,data:await response.json()};};}
 
-test('AI status reports durable budget without invoking provider; absent binding fails closed',async t=>{
- const {DB}=await fixture(t);let calls=0;const api=client(DB,{run(){calls++;return output();}});
- assert.deepEqual(await api('status'),{status:200,data:{available:true,model,dailyLimit:20,remainingCalls:20}});
- assert.equal(calls,0);
- assert.equal((await client(DB)('status')).data.available,false);
- assert.equal((await client(DB)()).status,503);
- assert.equal((await api('status')).data.remainingCalls,20);
+test('ten cards default count: automatic persistence, two AI quizzes, expert metadata and chat schema',async t=>{
+ const {DB,api:knowledge}=await fixture(t);let sent,calls=0;
+ const response=await client(DB,{run(name,request){calls++;assert.equal(name,model);sent=request;return output(Array.from({length:10},(_,i)=>({...atLevel(draft,'expert'),title:`知識${i}`,tags:['a','b','c','d','e','f'],notes:'verified by AI',sourceUrl:'https://invented.invalid/',id:crypto.randomUUID(),understanding:3})));}})('generate',{mode:'topic',topic:'学習',level:'expert'});
+ assert.equal(response.status,200);assert.equal(calls,1);assert.equal(response.data.generatedCount,10);assert.equal(response.data.requestedCount,10);assert.equal(response.data.level,'expert');assert.equal(response.data.model,model);assert.equal(response.data.remainingCalls,19);assert.deepEqual(response.data.skipped,[]);assert.deepEqual(response.data.failed,[]);assert.equal(response.data.candidates,undefined);assert.ok(!Number.isNaN(Date.parse(response.data.generatedAt)));
+ assert.equal(sent.prompt,undefined);assert.equal(sent.messages.length,2);assert.equal(sent.messages[0].role,'system');assert.ok(sent.messages[0].content.includes(JSON.stringify(sent.response_format.json_schema)));assert.match(sent.messages[1].content,/"level":"expert"/);assert.ok(sent.messages[1].content.endsWith('/no_think'));assert.ok(sent.max_tokens>=8192&&sent.max_tokens<=12000);assert.equal(sent.response_format.type,'json_schema');
+ assert.equal(response.data.items.length,10);for(const item of response.data.items){validateKnowledge(item);assert.ok(item.id);assert.equal(item.sourceUrl,'');assert.equal(item.understanding,0);assert.deepEqual(item.quizzes.map(q=>q.type),['recall','choice']);assert.ok(item.quizzes.every(q=>q.id));assert.equal(item.tags.length,6);assert.ok(item.tags.includes('レベル:専門家'));assert.match(item.notes,/専門家/);assert.match(item.notes,/AI生成・未検証/);assert.ok(!item.notes.includes('verified by AI'));}assert.equal((await knowledge('knowledge')).data.total,10);
+});
+test('beginner default and each selected level reach provider, notes and tags',async t=>{
+ const {DB}=await fixture(t);for(const [level,label] of [[undefined,'初級'],['beginner','初級'],['intermediate','中級'],['advanced','上級'],['expert','専門家']]){let sent;const r=await client(DB,{run(_m,request){sent=request;return output([{...atLevel(draft,level),title:'レベル'+String(level)}]);}})('generate',{...input,...(level?{level}:{})});assert.equal(r.status,200);assert.equal(r.data.level,level??'beginner');assert.ok(r.data.items[0].tags.includes('レベル:'+label));assert.match(r.data.items[0].notes,new RegExp(label));assert.match(sent.messages[1].content,new RegExp('"level":"'+(level??'beginner')+'"'));}
+});
+test('source uses exact content and answers, AI distractors, server notes, no explanation claims',async t=>{
+ const {DB}=await fixture(t),body={mode:'source',sourceText:'HTTPはリクエストとレスポンスで通信する。GETは情報を取得する。POSTは情報を送信する。',sourceUrl:'https://example.test/article#part',level:'expert',count:1},valid={...copy(draft),title:'HTTPのGET',content:' GETは情報を取得する。 ',quizzes:[{type:'recall',prompt:'GETの用途は？',answer:' 情報を取得する。 ',explanation:'未確認の説明'},{type:'choice',prompt:'資料にあるGETの用途は？',answer:'GETは情報を取得する。',explanation:'未確認の説明',options:['GETは情報を取得する。','ネットワークを切断する。','ファイルを削除する。'],correctIndex:0}]};let sent;
+ const r=await client(DB,{run(_m,request){sent=request;return output([valid]);}})('generate',body);assert.equal(r.status,200);const item=r.data.items[0];assert.equal(item.content,'GETは情報を取得する。');assert.equal(item.quizzes[0].answer,'情報を取得する。');assert.ok(item.quizzes.every(q=>q.explanation===''));assert.match(item.notes,/https:\/\/example.test\/article/);assert.match(item.notes,/誤答/);assert.equal((await DB.prepare('SELECT count(*) AS n FROM sources').first()).n,0);
+ const p=sent.response_format.json_schema.properties.candidates.items.properties,q=p.quizzes;assert.equal(q.minItems,2);assert.equal(q.maxItems,2);assert.equal(q.items.properties.explanation.maxLength,0);assert.deepEqual(q.items.properties.answer.enum,p.content.enum);assert.deepEqual(q.items.properties.type.enum,['recall','choice']);assert.ok(p.content.enum.every(e=>body.sourceText.includes(e)));assert.match(sent.messages[0].content,/連続した原文/);assert.match(sent.messages[0].content,/反例/);assert.match(sent.messages[0].content,/足りない事実/);
+ for(const mutate of [d=>{d.content='GETはデータを取得する。';},d=>{d.quizzes[0].answer='外部の事実';},d=>{d.quizzes[1].answer=d.quizzes[1].options[0]='外部の事実';}]){const bad=copy(valid);bad.title='保存不可';mutate(bad);const r=await client(DB,{run:()=>output([bad])})('generate',body);assert.equal(r.status,502);assert.equal(r.data.code,'AI_INVALID_OUTPUT');}assert.equal((await DB.prepare('SELECT count(*) AS n FROM knowledge').first()).n,1);
+});
+test('source excerpt enums include comma clauses and remain bounded for long sources',async t=>{
+ const {DB}=await fixture(t);let index=0;for(const sourceText of ['HTTPではリクエストを送り、サーバーがレスポンスを返す。GETは情報の取得、POSTは情報の送信に使う。','！？。','甲'.repeat(8000),Array.from({length:300},(_,i)=>`項目${i}は試験用の文章である。`).join('')]){let options;const r=await client(DB,{run(_m,request){options=request.response_format.json_schema.properties.candidates.items.properties.content.enum;const card=copy(draft);card.title='抜粋'+index++;card.content=card.quizzes[0].answer=card.quizzes[1].answer=card.quizzes[1].options[0]=options[0];return output([card]);}})('generate',{mode:'source',sourceText,count:1});assert.equal(r.status,200);assert.ok(options.length>0&&options.length<=80);assert.equal(new Set(options).size,options.length);assert.ok(options.every(o=>o===o.trim()&&o.length<=600&&sourceText.includes(o)));assert.ok(options.reduce((sum,o)=>sum+o.length,0)<=2400);if(sourceText.includes('GET'))assert.ok(options.includes('GETは情報の取得'));}
+});
+test('entire output validated before any saves: quiz order, choices, links, bounds, prototype, truncation',async t=>{
+ const {DB,api:knowledge}=await fixture(t),invalid=[];for(const mutate of [d=>{d.quizzes.pop();},d=>{d.quizzes.reverse();},d=>{d.quizzes[1].options[1]=d.quizzes[1].options[0];},d=>{d.quizzes[1].correctIndex=1;},d=>{d.quizzes[1].options[2]='https://bad.invalid';},d=>{d.quizzes[1].prompt='[go](x)';},d=>{d.quizzes[1].explanation='javascript:alert(1)';},d=>{d.quizzes[0].explanation='https://bad.invalid';},d=>{d.quizzes[0].options=['wrong'];},d=>{d.quizzes[1].options[2]=JSON.parse('{"constructor":"bad"}');}]){const card=copy(draft);card.title='不正';mutate(card);invalid.push(output([draft,card]));}invalid.push({response:'x'.repeat(80001)},{response:'{"candidates":[{"__proto__":{}}]}'},{choices:[{message:{content:JSON.stringify({candidates:[draft,draft]})},finish_reason:'length'}]});for(const value of invalid){const r=await client(DB,{run:()=>value})('generate',{...input,count:2});assert.equal(r.status,502);assert.equal(r.data.code,'AI_INVALID_OUTPUT');assert.equal((await knowledge('knowledge')).data.total,0);}assert.equal((await client(DB,{run(){}})('status')).data.remainingCalls,20-invalid.length);
+});
+test('source explanations still reject unsafe strings before being removed',async t=>{const {DB}=await fixture(t),card=copy(draft);card.content=card.quizzes[0].answer=card.quizzes[1].answer=card.quizzes[1].options[0]='原文。';card.quizzes[1].explanation='https://bad.invalid';assert.equal((await client(DB,{run:()=>output([card])})('generate',{mode:'source',sourceText:'原文。',count:1})).status,502);});
+test('auto save skips existing, continues after transaction failure and hides database details',async t=>{
+ const {DB,api:knowledge}=await fixture(t),existing=(await knowledge('knowledge','POST',{title:draft.title+'（初級）',content:'元の内容'})).data.item;let batches=0;const failingDB={prepare:DB.prepare.bind(DB),batch:async s=>{if(++batches===1)throw new Error('private database token');return DB.batch(s);}};const r=await client(failingDB,{run:()=>output([draft,{...copy(draft),title:'保存失敗'},{...copy(draft),title:'保存成功'}])})('generate',{...input,count:3});assert.equal(r.status,200);assert.equal(r.data.generatedCount,3);assert.equal(r.data.requestedCount,3);assert.equal(r.data.items.length,1);assert.equal(r.data.items[0].title,'保存成功（初級）');assert.deepEqual(r.data.skipped,[{title:draft.title+'（初級）',reason:'duplicate',existingId:existing.id}]);assert.equal(r.data.failed.length,1);assert.equal(r.data.failed[0].title,'保存失敗（初級）');assert.ok(r.data.failed[0].message);assert.ok(!JSON.stringify(r).includes('private'));assert.equal((await knowledge('knowledge/'+existing.id)).data.item.content,'元の内容');assert.equal((await knowledge('knowledge')).data.total,2);assert.equal((await DB.prepare('SELECT count(*) AS n FROM quizzes').first()).n,3);
+});
+test('invalid input fails without budget or provider consumption',async t=>{
+ const {DB}=await fixture(t);let calls=0;const api=client(DB,{run(){calls++;return output();}});for(const body of [{...input,topic:''},{...input,topic:'a'.repeat(201)},{...input,count:11},{...input,count:0},{...input,count:1.5},{...input,count:'2'},{...input,level:'professional'},{...input,level:1},{...input,level:null},{...input,mode:'url'},{mode:'source',sourceText:''},{mode:'source',sourceText:'a'.repeat(8001)},{...input,sourceUrl:'javascript:alert(1)'},{...input,sourceUrl:'https://name:pass@example.test'},{...input,...JSON.parse('{"__proto__":{"polluted":true}}')},{...input,ignored:'a'.repeat(150000)}])assert.equal((await api('generate',body)).status,400);assert.equal(calls,0);assert.equal((await api('status')).data.remainingCalls,20);
+});
+test('status, missing binding, provider and quota failures preserve daily rules and redact details',async t=>{
+ const {DB,api:knowledge}=await fixture(t);let calls=0;assert.deepEqual(await client(DB,{run(){calls++;}})('status'),{status:200,data:{available:true,model,dailyLimit:20,remainingCalls:20}});assert.equal(calls,0);assert.equal((await client(DB)()).status,503);const r=await client(DB,{run(){calls++;throw new Error('provider private detail');}})();assert.equal(r.status,502);assert.equal(r.data.code,'AI_PROVIDER_ERROR');assert.ok(!JSON.stringify(r).includes('private detail'));const quota=await client(DB,{run(){calls++;throw Object.assign(new Error('daily free allocation exhausted'),{status:429});}})();assert.equal(quota.status,429);assert.equal(quota.data.code,'AI_PROVIDER_LIMIT');assert.equal(calls,2);assert.equal((await client(DB,{run(){}})('status')).data.remainingCalls,18);assert.equal((await knowledge('knowledge','POST',{title:'通常の知識',content:'利用可能'})).status,201);
+});
+test('timeout releases at sixty seconds, no retry or refund',async t=>{const {DB}=await fixture(t);let calls=0,started;const invoked=new Promise(resolve=>{started=resolve;});t.mock.timers.enable({apis:['setTimeout']});const pending=client(DB,{run(){calls++;started();return new Promise(()=>{});}})();await invoked;t.mock.timers.tick(60000);const r=await pending;assert.equal(r.status,504);assert.equal(r.data.code,'AI_TIMEOUT');assert.equal(calls,1);assert.equal((await client(DB,{run(){}})('status')).data.remainingCalls,19);});
+test('atomic quota under concurrency counts attempts even when generated cards are duplicates',async t=>{
+ const {DB}=await fixture(t);let calls=0;const yesterday=new Date(Date.now()-86400000).toISOString().slice(0,10),today=new Date().toISOString().slice(0,10);await DB.prepare('INSERT INTO ai_daily_usage(day,calls) VALUES (?,20)').bind(yesterday).run();const api=client(DB,{run:()=>{calls++;return output();}}),rs=await Promise.all(Array.from({length:27},()=>api()));assert.equal(rs.filter(r=>r.status===200).length,20);assert.equal(rs.filter(r=>r.status===429&&r.data.code==='AI_DAILY_LIMIT').length,7);assert.equal(calls,20);assert.equal(rs.filter(r=>r.data.items?.length).length,1);assert.equal((await DB.prepare('SELECT calls FROM ai_daily_usage WHERE day=?').bind(today).first()).calls,20);assert.equal((await api('status')).data.remainingCalls,0);
+});
+test('backup version one retains AI quiz and level metadata but never imports quota',async t=>{const first=await fixture(t),second=await fixture(t);await client(first.DB,{run:()=>output()})();const backup=(await first.api('backup')).data;assert.equal(backup.version,1);assert.deepEqual(Object.keys(backup.tables),Object.keys(TABLES));assert.equal(backup.tables.ai_daily_usage,undefined);assert.equal((await second.api('backup/validate','POST',backup)).status,200);assert.equal((await second.api('backup/import','POST',backup)).status,200);assert.equal((await client(second.DB,{run(){}})('status')).data.remainingCalls,20);const item=(await second.api('knowledge')).data.items[0];assert.deepEqual(item.quizzes.map(q=>q.type).sort(),['choice','recall']);assert.ok(item.tags.includes('レベル:初級'));});
+
+test('ten automatic saves stay within the free Worker D1 query limit including racing duplicates',async t=>{
+ const {DB}=await fixture(t),prepare=DB.prepare.bind(DB),batch=DB.batch.bind(DB);let queries=0,writeBatches=0,race=false;
+ const wrap=statement=>new Proxy(statement,{get(target,key){const value=Reflect.get(target,key);if(key==='bind')return(...args)=>wrap(value.apply(target,args));if(['first','all','run'].includes(key))return(...args)=>{queries++;return value.apply(target,args);};return typeof value==='function'?value.bind(target):value;}});
+ const countedDB={prepare:sql=>wrap(prepare(sql)),batch:async statements=>{queries++;if(race){writeBatches++;throw new Error('UNIQUE constraint failed');}return batch(statements);}};
+ const cards=Array.from({length:10},(_,i)=>({...copy(draft),title:'制限'+i})),api=client(countedDB,{run:()=>output(cards)});
+ const result=await api('generate',{...input,count:10});assert.equal(result.status,200);assert.equal(result.data.items.length,10);assert.ok(queries<=40,`ten cards used ${queries} D1 queries`);
+ queries=0;race=true;const raceCards=cards.map(c=>({...c,title:'競合'+c.title}));const racing=await client(countedDB,{run:()=>output(raceCards)})('generate',{...input,count:10});assert.equal(racing.status,200);assert.equal(writeBatches,10);assert.equal(racing.data.skipped.length,10);assert.ok(queries<=40,`races used ${queries} D1 queries`);
 });
 
-test('AI generates valid unsaved recall drafts, discards model metadata and preserves one caller URL only in forced notes',async t=>{
- const {DB,api:knowledge}=await fixture(t);let sent;
- const api=client(DB,{run(name,request){assert.equal(name,model);sent=request;return output([{...draft,sourceUrl:'https://invented.invalid/',notes:'verified by AI',id:crypto.randomUUID(),understanding:3},{...draft,title:'分散練習'}]);}});
- const response=await api('generate',{mode:'source',sourceText:'想起練習とは、学んだ内容を見ずに思い出す練習。',sourceUrl:'https://example.test/article#part',count:2});
- assert.equal(response.status,200);assert.equal(response.data.mode,'source');assert.equal(response.data.model,model);assert.equal(response.data.remainingCalls,19);assert.ok(!Number.isNaN(Date.parse(response.data.generatedAt)));
- assert.equal(sent.prompt,undefined);assert.equal(sent.messages.length,2);assert.equal(sent.messages[0].role,'system');assert.ok(sent.messages[0].content.includes(JSON.stringify(sent.response_format.json_schema)));assert.equal(sent.messages[1].role,'user');assert.ok(sent.messages[1].content.endsWith('/no_think'));assert.ok(sent.max_tokens<=4096);assert.equal(sent.response_format.type,'json_schema');
- assert.equal(response.data.candidates.length,2);
- for(const candidate of response.data.candidates){validateKnowledge(candidate);assert.equal(candidate.sourceUrl,'');assert.equal(candidate.understanding,0);assert.equal(candidate.id,undefined);assert.equal(candidate.quizzes.length,1);assert.equal(candidate.quizzes[0].type,'recall');assert.equal(candidate.quizzes[0].id,undefined);assert.match(candidate.notes,/AI/);assert.match(candidate.notes,/未検証/);assert.match(candidate.notes,/提供された文章/);assert.match(candidate.notes,/https:\/\/example.test\/article/);assert.ok(!candidate.notes.includes('invented'));assert.ok(!candidate.notes.includes('verified by AI'));}
- assert.equal((await knowledge('knowledge')).data.total,0);
- for(const candidate of response.data.candidates)assert.equal((await knowledge('knowledge','POST',candidate)).status,201);
- assert.equal((await DB.prepare('SELECT count(*) AS n FROM sources').first()).n,0);
+
+test('model cannot add conflicting level tags; invalid null count is rejected',async t=>{
+ const {DB}=await fixture(t),api=client(DB,{run:()=>output([{...copy(draft),tags:['レベル:専門家','レベル:上級','学習']}])});const r=await api();assert.equal(r.status,200);assert.deepEqual(r.data.items[0].tags,['レベル:初級','学習'].sort());assert.equal((await api('generate',{...input,count:null})).status,400);
 });
 
-test('source mode rejects invented content or answers, retains exact excerpts and removes generated explanation claims',async t=>{
- const {DB}=await fixture(t),body={mode:'source',sourceText:'HTTPはリクエストとレスポンスで通信する。GETは情報を取得する。POSTは情報を送信する。',count:1};
- const valid={title:'HTTPのGET',content:'GETは情報を取得する。',category:'通信',tags:['HTTP'],quizzes:[{type:'recall',prompt:'GETの用途は？',answer:'情報を取得する。',explanation:'GETはURLクエリパラメーターを利用する。'}]};
- for(const candidate of [{...valid,content:valid.content+'GETはURLクエリパラメーターを利用する。'},{...valid,quizzes:[{...valid.quizzes[0],answer:'URLクエリパラメーターを利用する。'}]},{...valid,content:'GETはデータを取得する。'},{...valid,content:'GETは情報を取得する。POSTは情報を送信する。HTTPはリクエストとレスポンスで通信する。'}]){
-  const response=await client(DB,{run:async()=>output([candidate])})('generate',body);
-  assert.equal(response.status,502);assert.equal(response.data.code,'AI_INVALID_OUTPUT');
- }
- let sent;
- const response=await client(DB,{run:async(_model,request)=>{sent=request;return output([{...valid,content:' \nGETは情報を取得する。\n ',quizzes:[{...valid.quizzes[0],answer:' 情報を取得する。 '}]}]);}})('generate',body);
- assert.equal(response.status,200);assert.equal(response.data.candidates[0].content,'GETは情報を取得する。');assert.equal(response.data.candidates[0].quizzes[0].answer,'情報を取得する。');assert.equal(response.data.candidates[0].quizzes[0].explanation,'');
- assert.match(sent.messages[0].content,/連続した原文/);assert.equal(sent.response_format.json_schema.properties.candidates.items.properties.quizzes.items.properties.explanation.maxLength,0);
- const properties=sent.response_format.json_schema.properties.candidates.items.properties,excerpts=properties.content.enum;
- assert.ok(Array.isArray(excerpts)&&excerpts.length>0&&excerpts.length<=80);assert.deepEqual(properties.quizzes.items.properties.answer.enum,excerpts);
- assert.ok(excerpts.every(excerpt=>typeof excerpt==='string'&&excerpt.length>0&&excerpt.length<=600&&body.sourceText.includes(excerpt)));
- assert.ok(excerpts.includes('GETは情報を取得する。'));assert.ok(!excerpts.includes('GETはURLクエリパラメーターを利用する。'));
- const topic=await client(DB,{run:async()=>output([valid])})('generate',{mode:'topic',topic:'HTTP',count:1});
- assert.equal(topic.status,200);assert.equal(topic.data.candidates[0].quizzes[0].explanation,'GETはURLクエリパラメーターを利用する。');
+test('same topic can be saved at each level without overwriting, while same level duplicates skip',async t=>{
+ const {DB}=await fixture(t);let level='beginner';const api=client(DB,{run:()=>output([atLevel(draft,level)])});const first=await api();level='intermediate';const second=await api('generate',{...input,level});level='beginner';const third=await api();assert.equal(first.data.items.length,1);assert.equal(second.data.items.length,1);assert.equal(first.data.items[0].title,'想起練習（初級）');assert.equal(second.data.items[0].title,'想起練習（中級）');assert.notEqual(first.data.items[0].id,second.data.items[0].id);assert.equal(third.data.skipped.length,1);assert.equal(third.data.skipped[0].existingId,first.data.items[0].id);
+ const long=await client(DB,{run:()=>output([{...copy(draft),title:'あ'.repeat(300)}])})();assert.equal(long.status,200);assert.equal(long.data.items[0].title.length,300);assert.ok(long.data.items[0].title.endsWith('（初級）'));
 });
 
-test('source excerpt enums include Japanese comma clauses and stay bounded across long passages',async t=>{
- const {DB}=await fixture(t);
- for(const sourceText of ['HTTPではクライアントがリクエストを送り、サーバーがレスポンスを返す。GETは情報の取得、POSTは情報の送信に使う。','！？。','甲'.repeat(8000),Array.from({length:300},(_,i)=>`項目${i}は試験用の文章である。`).join('')]){
-  let options;
-  const response=await client(DB,{run:async(_model,request)=>{const props=request.response_format.json_schema.properties.candidates.items.properties;options=props.content.enum;assert.ok(Array.isArray(options));assert.deepEqual(props.quizzes.items.properties.answer.enum,options);return output([{...draft,content:options[0],quizzes:[{...draft.quizzes[0],answer:options[0]}]}]);}})('generate',{mode:'source',sourceText,count:1});
-  assert.equal(response.status,200);assert.ok(options.length>0&&options.length<=80);assert.equal(new Set(options).size,options.length);assert.ok(options.every(option=>option===option.trim()&&option.length<=600&&sourceText.includes(option)));assert.ok(options.reduce((sum,option)=>sum+option.length,0)<=2400);
-  if(sourceText.includes('GET')){assert.ok(options.includes('GETは情報の取得'));assert.ok(options.includes('POSTは情報の送信に使う。'));}
- }
+test('binding response supports parsed response and JSON response in addition to chat choices',async t=>{const {DB}=await fixture(t);for(const [index,response] of [{candidates:[draft]},JSON.stringify({candidates:[{...copy(draft),title:'別形式'}]})].entries()){const r=await client(DB,{run:()=>({response})})();assert.equal(r.status,200);assert.equal(r.data.items.length,1);assert.equal(r.data.generatedCount,1);assert.equal(r.data.remainingCalls,19-index);}});
+
+test('committed new cards return known saved DTOs without a fallible postcommit read',async t=>{const {DB,api:knowledge}=await fixture(t);let batches=0;const noReadDB={prepare:DB.prepare.bind(DB),batch:async statements=>{if(++batches>1)throw new Error('postcommit read unavailable');return DB.batch(statements);}};const r=await client(noReadDB,{run:()=>output()})();assert.equal(r.status,200);assert.equal(r.data.items.length,1);assert.deepEqual(r.data.failed,[]);assert.equal(batches,1);assert.deepEqual((await knowledge('knowledge/'+r.data.items[0].id)).data.item,r.data.items[0]);});
+
+test('provider receives only the selected difficulty instructions with substantive question requirements',async t=>{const {DB}=await fixture(t);for(const [level,label,expected] of [['beginner','初級',/基本用語.*識別/],['intermediate','中級',/具体例.*応用/],['advanced','上級',/制約.*比較/],['expert','専門家',/反例.*修正/]]){let system,user,promptSchema;const r=await client(DB,{run(_m,request){system=request.messages[0].content;user=request.messages[1].content;promptSchema=request.response_format.json_schema.properties.candidates.items.properties.quizzes.items.properties.prompt;return output([{...atLevel(draft,level),title:level}]);}})('generate',{...input,level});assert.equal(r.status,200);assert.ok(system.includes('今回の学習レベル: '+label));assert.match(system,expected);assert.ok(user.indexOf('アプリ指定の出題条件')>user.indexOf('入力資料(JSON)'));assert.ok(user.includes('今回の学習レベル: '+label));assert.match(promptSchema.description,expected);if(level==='expert')assert.match(system,/定義.*計算量.*暗記だけ.*不十分/);}});
+
+test('topic difficulty cases are required, bounded and included in each persisted question',async t=>{
+ const {DB}=await fixture(t);for(const [level,fields,labels] of [['intermediate',['situation'],['状況']],['advanced',['situation','constraint'],['状況','制約']],['expert',['claim','counterexample'],['主張','反例']]]){let schema;const card=atLevel({...copy(draft),title:'事例'+level},level);const r=await client(DB,{run(_m,request){schema=request.response_format.json_schema.properties.candidates.items.properties.quizzes.items;return output([card]);}})('generate',{...input,level});assert.equal(r.status,200);assert.ok(schema.required.includes('case'));assert.deepEqual(schema.properties.case.required,fields);for(const field of fields){assert.equal(schema.properties.case.properties[field].minLength,1);assert.equal(schema.properties.case.properties[field].maxLength,120);}for(const quiz of r.data.items[0].quizzes){assert.equal(quiz.case,undefined);assert.ok(quiz.prompt.length<=1000);for(const label of labels)assert.ok(quiz.prompt.includes(label+': '));for(const field of fields)assert.ok(quiz.prompt.includes(card.quizzes[0].case[field]));}}
 });
 
-test('AI rejects invalid input, dangerous URLs and prototype keys without consuming budget or calling provider',async t=>{
- const {DB}=await fixture(t);let calls=0;const api=client(DB,{run(){calls++;return output();}});
- for(const body of [{...input,topic:''},{...input,topic:'a'.repeat(201)},{...input,count:4},{...input,count:1.5},{...input,mode:'url'},{mode:'source',sourceText:''},{mode:'source',sourceText:'a'.repeat(8001)},{...input,sourceUrl:'javascript:alert(1)'},{...input,sourceUrl:'https://name:pass@example.test'},{...input,...JSON.parse('{"__proto__":{"polluted":true}}')}, {...input,ignored:'a'.repeat(150000)}])assert.equal((await api('generate',body)).status,400);
- assert.equal(calls,0);assert.equal((await api('status')).data.remainingCalls,20);
+test('invalid topic cases reject the full generated batch before any save',async t=>{
+ const {DB,api:knowledge}=await fixture(t);for(const mutate of [q=>{delete q.case;},q=>{q.case={};},q=>{q.case.claim='';},q=>{q.case.claim='   ';},q=>{q.case.counterexample='あ'.repeat(121);},q=>{q.case.claim='参考資料 https://unsafe.example.test/path';},q=>{q.case.extra='別の値';},q=>{q.case=JSON.parse('{"__proto__":{}}');}]){const valid=atLevel(draft,'expert'),invalid=atLevel({...copy(draft),title:'不正事例'},'expert');mutate(invalid.quizzes[1]);const r=await client(DB,{run:()=>output([valid,invalid])})('generate',{...input,count:2,level:'expert'});assert.equal(r.status,502);assert.equal(r.data.code,'AI_INVALID_OUTPUT');assert.equal((await knowledge('knowledge')).data.total,0);}
 });
 
-test('AI rejects malformed, overlong, excessive, duplicate and link-bearing model drafts and counts attempts',async t=>{
- const {DB}=await fixture(t);
- const badOutputs=[{}, {response:'not json'},output([]),output([draft,draft]),output([{...draft,title:'a'.repeat(301)}]),output([{...draft,quizzes:[]}]),output([{...draft,quizzes:[{...draft.quizzes[0],type:'choice'}]}]),output([{...draft,content:'read https://invented.invalid/'}]),{response:'x'.repeat(40001)}, {response:'{"candidates":[{"__proto__":{}}]}'}, {choices:[{message:{content:JSON.stringify({candidates:[draft]})},finish_reason:'length'}]}];
- for(const value of badOutputs){const response=await client(DB,{run:async()=>value})();assert.equal(response.status,502,JSON.stringify(value).slice(0,100));assert.equal(response.data.code,'AI_INVALID_OUTPUT');}
- assert.equal((await client(DB,{run(){}})('status')).data.remainingCalls,20-badOutputs.length);
- const api=client(DB,{run:async()=>output([draft,{...draft}])});
- assert.equal((await api('generate',{...input,count:2})).status,502);
-});
-
-test('AI provider failure and actual free-quota exhaustion count once, redact details, do not retry or break knowledge APIs',async t=>{
- const {DB,api:knowledge}=await fixture(t);let calls=0;
- const failure=await client(DB,{run(){calls++;throw new Error('provider private detail');}})();
- assert.equal(failure.status,502);assert.equal(failure.data.code,'AI_PROVIDER_ERROR');assert.ok(!JSON.stringify(failure).includes('private detail'));assert.equal(calls,1);
- const quota=await client(DB,{run(){calls++;throw Object.assign(new Error('daily free allocation exhausted'),{status:429});}})();
- assert.equal(quota.status,429);assert.equal(quota.data.code,'AI_PROVIDER_LIMIT');assert.equal(calls,2);
- assert.equal((await client(DB,{run(){}})('status')).data.remainingCalls,18);
- assert.equal((await knowledge('knowledge','POST',{title:'通常の知識',content:'利用可能'})).status,201);
-});
-
-test('AI timeout releases the request at 60 seconds without retry or refund',async t=>{
- const {DB}=await fixture(t);let calls=0,started;
- const invoked=new Promise(resolve=>{started=resolve;});
- t.mock.timers.enable({apis:['setTimeout']});
- const pending=client(DB,{run(){calls++;started();return new Promise(()=>{});}})();
- await invoked;t.mock.timers.tick(60000);
- const response=await pending;assert.equal(response.status,504);assert.equal(response.data.code,'AI_TIMEOUT');assert.equal(calls,1);
- assert.equal((await client(DB,{run(){}})('status')).data.remainingCalls,19);
-});
-
-test('AI uses atomic D1 daily reservations under concurrency and resumes on the next UTC day',async t=>{
- const {DB}=await fixture(t);let calls=0;
- const yesterday=new Date(Date.now()-86400000).toISOString().slice(0,10),today=new Date().toISOString().slice(0,10);
- await DB.prepare('INSERT INTO ai_daily_usage(day,calls) VALUES (?,20)').bind(yesterday).run();
- const api=client(DB,{run:async()=>{calls++;return output();}});
- const responses=await Promise.all(Array.from({length:27},()=>api()));
- assert.equal(responses.filter(r=>r.status===200).length,20);assert.equal(responses.filter(r=>r.status===429&&r.data.code==='AI_DAILY_LIMIT').length,7);assert.equal(calls,20);
- assert.equal((await DB.prepare('SELECT calls FROM ai_daily_usage WHERE day=?').bind(today).first()).calls,20);
- assert.equal((await api('status')).data.remainingCalls,0);
-});
-
-test('AI operational usage stays outside version-one learning backup and import does not restore its quota',async t=>{
- const first=await fixture(t),second=await fixture(t);
- await client(first.DB,{run:async()=>output()})();
- const backup=(await first.api('backup')).data;assert.equal(backup.version,1);assert.deepEqual(Object.keys(backup.tables),Object.keys(TABLES));assert.equal(backup.tables.ai_daily_usage,undefined);
- assert.equal((await second.api('backup/validate','POST',backup)).status,200);
- assert.equal((await second.api('backup/import','POST',backup)).status,200);
- assert.equal((await client(second.DB,{run(){}})('status')).data.remainingCalls,20);
-});
+test('brief nonempty topic cases are valid without artificial minimum character padding',async t=>{const {DB}=await fixture(t),card=atLevel({...copy(draft),title:'短い反例'},'expert');for(const quiz of card.quizzes)quiz.case={claim:'二分探索は常に効率的に動作する。',counterexample:'未整列では探索に失敗する。'};const r=await client(DB,{run:()=>output([card])})('generate',{...input,level:'expert'});assert.equal(r.status,200);assert.equal(r.data.items.length,1);assert.match(r.data.items[0].quizzes[0].prompt,/主張: 二分探索は常に効率的に動作する。/);});

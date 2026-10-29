@@ -11,11 +11,13 @@ const quizDto=q=>({id:q.id,type:q.type,prompt:q.prompt,answer:q.answer,explanati
 const reviewDto=r=>({id:r.id,knowledgeId:r.knowledge_id,quizId:r.quiz_id,rating:r.rating,response:r.response,selectedIndex:r.selected_index,correct:r.correct===null?null:!!r.correct,idempotencyKey:r.idempotency_key,createdAt:r.created_at});
 async function hydrate(db,rows){
  if(!rows.length)return[];const ids=rows.map(r=>r.id),marks=ids.map(()=>'?').join(',');
- const [states,categories,tags,sources,notes,quizzes]=await Promise.all([
- all(db,`SELECT * FROM review_state WHERE knowledge_id IN (${marks})`,...ids),
- all(db,`SELECT kc.knowledge_id,c.name FROM knowledge_categories kc JOIN categories c ON c.id=kc.category_id WHERE kc.knowledge_id IN (${marks})`,...ids),
- all(db,`SELECT kt.knowledge_id,t.name FROM knowledge_tags kt JOIN tags t ON t.id=kt.tag_id WHERE kt.knowledge_id IN (${marks}) ORDER BY t.name`,...ids),
- all(db,`SELECT * FROM sources WHERE knowledge_id IN (${marks})`,...ids),all(db,`SELECT * FROM notes WHERE knowledge_id IN (${marks})`,...ids),all(db,`SELECT * FROM quizzes WHERE knowledge_id IN (${marks}) AND active=1 ORDER BY rowid`,...ids)]);
+ // D1 counts one batch as one query against the free per-invocation limit.
+ const [states,categories,tags,sources,notes,quizzes]=(await db.batch([
+ `SELECT * FROM review_state WHERE knowledge_id IN (${marks})`,
+ `SELECT kc.knowledge_id,c.name FROM knowledge_categories kc JOIN categories c ON c.id=kc.category_id WHERE kc.knowledge_id IN (${marks})`,
+ `SELECT kt.knowledge_id,t.name FROM knowledge_tags kt JOIN tags t ON t.id=kt.tag_id WHERE kt.knowledge_id IN (${marks}) ORDER BY t.name`,
+ `SELECT * FROM sources WHERE knowledge_id IN (${marks})`,`SELECT * FROM notes WHERE knowledge_id IN (${marks})`,`SELECT * FROM quizzes WHERE knowledge_id IN (${marks}) AND active=1 ORDER BY rowid`
+ ].map(sql=>db.prepare(sql).bind(...ids)))).map(result=>result.results);
  return rows.map(r=>({id:r.id,title:r.title,content:r.content,category:categories.find(x=>x.knowledge_id===r.id)?.name??'',tags:tags.filter(x=>x.knowledge_id===r.id).map(x=>x.name),sourceUrl:sources.find(x=>x.knowledge_id===r.id)?.url??'',notes:notes.find(x=>x.knowledge_id===r.id)?.content??'',understanding:r.understanding,createdAt:r.created_at,updatedAt:r.updated_at,archivedAt:r.archived_at,schedule:scheduleDto(states.find(x=>x.knowledge_id===r.id)),quizzes:quizzes.filter(x=>x.knowledge_id===r.id).map(quizDto)}));
 }
 async function getItem(db,id){const row=await first(db,'SELECT * FROM knowledge WHERE id=?',id);if(!row)throw new ApiError('知識が見つからない','NOT_FOUND',404);return (await hydrate(db,[row]))[0];}
@@ -27,10 +29,10 @@ async function saveKnowledge(db,body,id){
  const duplicate=await first(db,'SELECT id FROM knowledge WHERE normalized_title=? AND id<>?',normalizeTitle(data.title),id);
  const duplicateUrl=data.sourceUrl?await first(db,'SELECT knowledge_id AS id FROM sources WHERE url=? AND knowledge_id<>?',data.sourceUrl,id):null;
  if(duplicate||duplicateUrl)throw new ApiError('同じタイトルまたはURLの知識がある','DUPLICATE',409,{existingId:(duplicate??duplicateUrl).id});
- const previous=await all(db,'SELECT * FROM quizzes WHERE knowledge_id=?',id),statements=[];
+ const previous=isNew?[]:await all(db,'SELECT * FROM quizzes WHERE knowledge_id=?',id),statements=[],savedQuizzes=[],initial=isNew?initialSchedule(new Date(now)):null;
  // A failing NOT NULL constraint aborts this entire transaction before children change.
  if(!isNew)statements.push(db.prepare('UPDATE knowledge SET content=CASE WHEN updated_at=? THEN content ELSE NULL END WHERE id=?').bind(body.expectedUpdatedAt,id));
- if(isNew){statements.push(db.prepare('INSERT INTO knowledge VALUES (?,?,?,?,?,?,?,NULL)').bind(id,data.title,data.content,normalizeTitle(data.title),data.understanding,now,now));const s=initialSchedule(new Date(now));statements.push(db.prepare('INSERT INTO review_state VALUES (?,?,?,?,?,?,?,0)').bind(id,s.dueAt,s.intervalDays,s.streak,s.lapses,s.reviews,s.status));}
+ if(isNew){statements.push(db.prepare('INSERT INTO knowledge VALUES (?,?,?,?,?,?,?,NULL)').bind(id,data.title,data.content,normalizeTitle(data.title),data.understanding,now,now));statements.push(db.prepare('INSERT INTO review_state VALUES (?,?,?,?,?,?,?,0)').bind(id,initial.dueAt,initial.intervalDays,initial.streak,initial.lapses,initial.reviews,initial.status));}
  else statements.push(db.prepare('UPDATE knowledge SET title=?,content=?,normalized_title=?,understanding=?,updated_at=? WHERE id=?').bind(data.title,data.content,normalizeTitle(data.title),data.understanding,now,id));
  statements.push(db.prepare('DELETE FROM knowledge_categories WHERE knowledge_id=?').bind(id),db.prepare('DELETE FROM knowledge_tags WHERE knowledge_id=?').bind(id),db.prepare('DELETE FROM sources WHERE knowledge_id=?').bind(id));
  if(data.category){statements.push(db.prepare('INSERT OR IGNORE INTO categories(id,name) VALUES (?,?)').bind(uuid(),data.category));statements.push(db.prepare('INSERT INTO knowledge_categories SELECT ?,id FROM categories WHERE name=?').bind(id,data.category));}
@@ -43,10 +45,12 @@ async function saveKnowledge(db,body,id){
   const unchanged=prior&&prior.type===q.type&&prior.prompt===q.prompt&&prior.answer===q.answer&&prior.explanation===q.explanation&&prior.options_json===JSON.stringify(q.options)&&prior.correct_index===q.correctIndex;
   // Changed questions receive a new identity so historic answers keep their original meaning.
   if(unchanged)statements.push(db.prepare('UPDATE quizzes SET active=1 WHERE id=?').bind(q.id));
-  else statements.push(db.prepare('INSERT INTO quizzes VALUES (?,?,?,?,?,?,?,?,1)').bind(uuid(),id,q.type,q.prompt,q.answer,q.explanation,JSON.stringify(q.options),q.correctIndex));
+  else{const quizId=uuid();statements.push(db.prepare('INSERT INTO quizzes VALUES (?,?,?,?,?,?,?,?,1)').bind(quizId,id,q.type,q.prompt,q.answer,q.explanation,JSON.stringify(q.options),q.correctIndex));savedQuizzes.push({...q,id:quizId});}
  }
  try{await db.batch(statements);}catch(error){if(!isNew){const latest=await first(db,'SELECT updated_at FROM knowledge WHERE id=?',id);if(latest?.updated_at!==body.expectedUpdatedAt)throw new ApiError('別の画面で更新されている。再読込してね','EDIT_CONFLICT',409);}if(String(error.message).includes('UNIQUE')){const conflict=await first(db,'SELECT id FROM knowledge WHERE normalized_title=?',normalizeTitle(data.title))??(data.sourceUrl?await first(db,'SELECT knowledge_id AS id FROM sources WHERE url=?',data.sourceUrl):null);throw new ApiError('同じタイトルまたはURLの知識がある','DUPLICATE',409,conflict?{existingId:conflict.id}:{});}throw error;}
- return getItem(db,id);
+ // A committed new transaction already determines this DTO. A later read outage
+ // must not turn a successful save into an apparent failure and invite duplicates.
+ return isNew?{id,...data,tags:[...data.tags].sort(),createdAt:now,updatedAt:now,archivedAt:null,schedule:initial,quizzes:savedQuizzes}:getItem(db,id);
 }
 async function listKnowledge(db,url){
  const limit=integerParam(url.searchParams.get('limit'),40,1,100),offset=integerParam(url.searchParams.get('offset'),0,0,1000000),values=[],conditions=[];
@@ -102,7 +106,18 @@ export async function handleApi(request,env){
  try{
   const url=new URL(request.url),path=url.pathname.replace(/\/$/,''),method=request.method,db=env.DB;if(!db)throw new ApiError('データベースが設定されていない','UNAVAILABLE',503);
   if(path==='/api/ai/status'&&method==='GET')return json(await aiStatus(env));
-  if(path==='/api/ai/generate'&&method==='POST')return json(await generateAi(request,env));
+  if(path==='/api/ai/generate'&&method==='POST'){
+   // generateAi validates the complete provider output before any persistence.
+   const {candidates,...metadata}=await generateAi(request,env),items=[],skipped=[],failed=[];
+   for(const candidate of candidates){
+    try{items.push(await saveKnowledge(db,candidate));}
+    catch(error){
+     if(error instanceof ApiError&&error.status===409&&error.code==='DUPLICATE')skipped.push({title:candidate.title,reason:'duplicate',...(isUuid(error.details?.existingId)?{existingId:error.details.existingId}:{})});
+     else failed.push({title:candidate.title,message:'この知識を保存できなかった。時間をおいて試してね'});
+    }
+   }
+   return json({items,skipped,failed,generatedCount:candidates.length,...metadata});
+  }
   if(path==='/api/knowledge'&&method==='GET')return json(await listKnowledge(db,url));
   if(path==='/api/knowledge'&&method==='POST')return json({item:await saveKnowledge(db,await readJson(request))},201);
   const match=path.match(/^\/api\/knowledge\/([^/]+)(\/archive)?$/);
