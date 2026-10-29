@@ -1,5 +1,9 @@
 # 検証結果 — 2026-10-28
 
+## AI追加の実環境確認 — 2026-10-29
+
+Cloudflareモデルへの変更を本人が承認。Node76/76、実Worker/D1 E2E7項目、AI画面6項目、認証画面4項目が成功。公開版で本人によるテーマ/文章生成、候補編集・保存・再読込を確認。文章の本文・答えは原文抜粋として検査し、AI候補は自動保存しない。匿名/偽装AI APIは401。390px表示で横はみ出しなし。PC常駐なし、Freeプランと固定無料対応モデルを維持。実スマホ端末は未確認。詳細は [AIカード運用記録](ai-cards.md)。以下の64件などはAI追加前の認証MVP時点の記録。
+
 ## 最終の実環境確認 — 2026-10-29
 
 ユーザー承認でFirebase SparkのGoogle本人認証へ変更。専用D1とWorkerを作成し、https://hiro-knowledge.aprintingmachinehiro.workers.dev/ へ公開した。Cloudflare Accessのカード・超過課金同意は行っていない。

@@ -6,3 +6,5 @@ progress{width:100%;height:8px;accent-color:var(--accent)}
 .list-link{display:block;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);padding:12px 0;color:var(--accent);font-weight:700;min-height:44px}.history-item{border-top:1px solid var(--line);padding:12px 0}.history-item p{margin:5px 0}
 
 .auth-locked .sidebar .nav,.auth-locked .side-bottom,.auth-locked .mobile-nav,.auth-locked .header-actions{display:none}.login-panel{max-width:520px;margin:8vh auto;padding:32px}.login-panel h2{margin-top:12px}.login-panel .primary{min-height:48px}
+
+.ai-results{margin-top:24px}.ai-candidate{border:1px solid var(--line);border-radius:12px;padding:16px;margin:12px 0;min-width:0;overflow-wrap:anywhere}.ai-candidate p{white-space:pre-wrap}.hero button+button{margin-left:8px}.ai-results,.modal-body{overflow-wrap:anywhere}@media(max-width:700px){.hero button+button{margin:8px 0 0}.hero button{max-width:100%}.modal-actions{flex-wrap:wrap}}

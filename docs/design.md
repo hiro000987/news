@@ -1,5 +1,7 @@
 # Hiro Knowledge design — 2026-10-28
 
+2026-10-29 AI追加承認: 本人はPC常駐を避け、Cloudflare上の別モデルへの切り替えを承認した。新しいAI仕様は `docs/superpowers/specs/2026-10-29-ai-cards-design.md`、運用と実証は `docs/ai-cards.md`。以下の初期「新規AI APIなし」はAI追加前の境界として保持する。
+
 2026-10-29変更承認: ZeroTrust Freeが支払い情報と超過課金同意を要求したため、ユーザーはFirebase SparkのGoogle本人ログインへの変更と、既存Sparkプロジェクトへの今回の認証ホスト1件追加を承認した。現在の公開構成は `docs/firebase-auth.md`。以下のAccess仕様は初期設計として保持し、実装も既定互換モードとして残す。
 
 本人専用の知識登録・想起・復習を、月額0円の Workers + D1 + Access で提供する。

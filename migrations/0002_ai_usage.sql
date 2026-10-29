@@ -1,0 +1,4 @@
+CREATE TABLE ai_daily_usage (
+ day TEXT PRIMARY KEY NOT NULL CHECK(length(day)=10),
+ calls INTEGER NOT NULL CHECK(calls BETWEEN 0 AND 20)
+);

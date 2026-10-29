@@ -1,6 +1,7 @@
 import {initialSchedule,scheduleReview} from './scheduler.js';
 import {ApiError,check,isUuid,uuid,readJson,text,validateKnowledge,normalizeTitle,integerParam,validTimestamp} from './validation.js';
 import {exportBackup,inspectBackup,importBackup,csvExport} from './backup.js';
+import {aiStatus,generateAi} from './ai.js';
 
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}});
 const all=async(db,sql,...values)=>(await db.prepare(sql).bind(...values).all()).results;
@@ -100,6 +101,8 @@ async function dashboard(db){
 export async function handleApi(request,env){
  try{
   const url=new URL(request.url),path=url.pathname.replace(/\/$/,''),method=request.method,db=env.DB;if(!db)throw new ApiError('データベースが設定されていない','UNAVAILABLE',503);
+  if(path==='/api/ai/status'&&method==='GET')return json(await aiStatus(env));
+  if(path==='/api/ai/generate'&&method==='POST')return json(await generateAi(request,env));
   if(path==='/api/knowledge'&&method==='GET')return json(await listKnowledge(db,url));
   if(path==='/api/knowledge'&&method==='POST')return json({item:await saveKnowledge(db,await readJson(request))},201);
   const match=path.match(/^\/api\/knowledge\/([^/]+)(\/archive)?$/);

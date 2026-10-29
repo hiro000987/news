@@ -28,6 +28,17 @@ test('public health exposes no identity, counts, or configuration',async()=>{
   assert.deepEqual(await (await worker.fetch(new Request('https://knowledge.example.test/health'),{})).json(),{status:'ok',app:'Hiro Knowledge'});
 });
 
+test('AI routes reject anonymous and cross-origin callers before model or quota access',async()=>{
+ let calls=0,queries=0;const AI={run(){calls++;throw new Error('must never invoke');}},DB={prepare(){queries++;throw new Error('must never query');}};
+ const production={ACCESS_TEAM_DOMAIN:'test.cloudflareaccess.com',ACCESS_AUD:'test',OWNER_EMAIL:'owner@example.test',DB,AI};
+ for(const path of ['status','generate']){
+  const response=await worker.fetch(new Request('https://knowledge.example.test/api/ai/'+path,{method:path==='status'?'GET':'POST'}),production);
+  assert.equal(response.status,401);
+ }
+ const crossOrigin=await worker.fetch(new Request('http://127.0.0.1:8787/api/ai/generate',{method:'POST',headers:{Origin:'https://evil.test'}}),{LOCAL_DEV:'true',DB,AI});
+ assert.equal(crossOrigin.status,403);assert.equal(calls,0);assert.equal(queries,0);
+});
+
 const firebaseEnv={AUTH_PROVIDER:'firebase',FIREBASE_PROJECT_ID:'hiro-knowledge-test',FIREBASE_API_KEY:'public-firebase-web-key',FIREBASE_AUTH_DOMAIN:'hiro-knowledge-test.firebaseapp.com',FIREBASE_APP_ID:'1:123456789:web:0123456789abcdef',OWNER_EMAIL:'owner@example.test'};
 test('Firebase public login shell and config expose only client fields; data APIs remain private',async()=>{
  let assets=0,db=0;const env={...firebaseEnv,DB:{prepare(){db++;throw new Error('must never query');}},ASSETS:{fetch(){assets++;return new Response('login shell');}}};

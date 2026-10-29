@@ -24,9 +24,14 @@ PC内だけで使うローカル版は **`Start-App.cmd`** または **Hiro Know
 - 今日の復習/学習、登録数、復習回数、3択の正答率、カテゴリー別グラフ、学習日を表示。
 - アーカイブと解除。削除ボタンを置かず、既存の学習履歴を保護。
 - 全学習データのJSON出力、検証プレビューからの追記復元、CSV出力。
+- Cloudflare AIでテーマまたは貼り付けた文章から最大3件のカード候補を生成。候補を編集してから明示的に保存。
 - PC/スマホ幅、ライト/ダーク/システムテーマに対応。
 
-AI APIは呼ばない。外部記事の取得や全文複製も行わない。登録する内容・出典・クイズは自分で確認する。
+AI生成は本人認証後、Cloudflare Workers AIの無料対応モデルを使う。PC常駐やChatGPTアプリは不要。入力したテーマ・文章は生成のためCloudflareへ送る。モデルに渡すのはその入力だけで、登録済みノート全体は送らない。外部記事のURLは自動取得しない。登録する内容・出典・クイズは自分で確認する。
+
+AI候補は未検証の下書きで、生成しただけでは保存されない。文章モードの本文と答えは原文からの抜粋に限定し、原文との一致を検査する。質問・タイトルはAIの下書きなので確認が必要。参考URLは入力されたものをメモに残す。1つの出典から複数カードを保存できるよう、既存のURL重複制約を変えず出典欄ではなくメモに保持する。テーマ指定だけの生成に出典確認や最新情報の調査は含まれない。
+
+AI生成はアプリ側で1日20回、毎日9時（日本時間）にリセット。失敗やタイムアウトも回数に含む。Cloudflare側の共有無料枠・混雑制限に先に達する場合もある。Freeプランを維持し、有料モデル・有料fallback・AI Gatewayの購入枠は使わない。[AI料金](https://developers.cloudflare.com/workers-ai/platform/pricing/)、[データの扱い](https://developers.cloudflare.com/workers-ai/platform/data-usage/)。通常のローカル版はAI接続なしで動く。クラウド接続と実環境の確認結果は [AIカード運用記録](docs/ai-cards.md)。
 
 ## 学習指標の意味
 
@@ -90,6 +95,6 @@ Firebaseモードではログイン画面とWeb設定だけが公開される。
 
 ## ファイル
 
-`src/index.js` が認証・安全なレスポンス、`src/auth.js` が本人認証、`src/api.js` がAPI、`src/validation.js` が入力検証、`src/backup.js` が復元、`src/scheduler.js` が復習計算を担当する。`migrations/` にDB定義、`public/` に画面、`tests/` に検証、`docs/` に設計と実証結果を置く。
+`src/index.js` が認証・安全なレスポンス、`src/auth.js` が本人認証、`src/api.js` がAPI、`src/ai.js` がAI生成、`src/validation.js` が入力検証、`src/backup.js` が復元、`src/scheduler.js` が復習計算を担当する。`migrations/` にDB定義、`public/` に画面、`tests/` に検証、`docs/` に設計と実証結果を置く。
 
 もとの `news` は空の初期コミットだったため、既存ニュース機能・既存DB・既読情報への変更はない。Hiro Memory / Supabaseには接続・変更していない。

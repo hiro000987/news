@@ -14,6 +14,17 @@ test('accepts the Cloudflare documented 32-hex Worker ID format',()=>{
   assert.doesNotThrow(()=>validate(config(),p));
 });
 const validate=(c=config(),p=proof(),mode='production')=>validateDeployment(c,p,{now,mode});
+
+test('AI deployment requires explicit free-model evidence and an exact binding',()=>{
+ const c=config(),p=proof();c.ai={binding:'AI'};
+ assert.throws(()=>validate(c,p));
+ p.workersAiFreeVerified=true;p.aiModel='@cf/qwen/qwen3-30b-a3b-fp8';
+ assert.doesNotThrow(()=>validate(c,p));
+ for(const ai of [{binding:'OTHER'},{binding:'AI',gateway_id:'paid-gateway'},{binding:'AI',remote:true},null]){
+  assert.throws(()=>validate({...c,ai},p));
+ }
+ p.aiModel='@cf/moonshotai/kimi-k2.6';assert.throws(()=>validate(c,p));
+});
 test('accepts a protected worker-level workers.dev deployment',()=>assert.doesNotThrow(()=>validate()));
 test('accepts a protected single custom hostname',()=>{const c=config(),p=proof();c.workers_dev=false;c.routes=[{pattern:'example.com'}];p.productionHost='example.com';assert.doesNotThrow(()=>validate(c,p));});
 test('bootstrap permits only inaccessible configuration with fresh free-plan proof',()=>{const c=config(),p=proof();c.workers_dev=false;delete c.vars.ACCESS_TEAM_DOMAIN;delete c.vars.ACCESS_AUD;assert.doesNotThrow(()=>validate(c,p,'bootstrap'));c.workers_dev=true;assert.throws(()=>validate(c,p,'bootstrap'));});

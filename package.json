@@ -10,6 +10,7 @@
     "test": "node --test tests/*.test.js",
     "test:e2e": "node scripts/build-auth.mjs && node tests/e2e.mjs",
     "test:auth-ui": "node tests/auth-ui.mjs",
+    "test:ai-ui": "node tests/ai-ui.mjs",
     "check": "node scripts/check.mjs",
     "deploy:check": "node scripts/deploy-check.mjs",
     "deploy": "node scripts/deploy-check.mjs --config wrangler.production.json && node scripts/build-auth.mjs && wrangler deploy --config wrangler.production.json"

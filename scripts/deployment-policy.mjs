@@ -1,3 +1,4 @@
+import { AI_MODEL } from '../src/ai.js';
 const DAY = 24 * 60 * 60 * 1000;
 const HOST = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -20,6 +21,7 @@ export function validateDeployment(c, proof, { now = Date.now(), mode = 'product
   if (!['access','firebase'].includes(provider)) reject('認証方式が正しくない。');
   const timestamp = Date.parse(proof.checkedAt), current = Number(now), age = current - timestamp;
   if (proof.freePlan !== true || !Number.isFinite(age) || age > DAY || age < -300000) reject('24時間以内の無料プラン確認記録が必要。');
+  if (Object.hasOwn(c,'ai') && (!c.ai || c.ai.binding !== 'AI' || Object.keys(c.ai).some(key=>key!=='binding') || proof.workersAiFreeVerified !== true || proof.aiModel !== AI_MODEL)) reject('AIには無料対応モデルの確認記録と専用AI bindingが必要。');
   if (Object.hasOwn(c, 'route')) reject('単数のroute設定は使用できません。');
   const routes = c.routes ?? [];
   if (!Array.isArray(routes)) reject('ルート設定が正しくない。');

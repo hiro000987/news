@@ -1,5 +1,7 @@
 # Implementation ledger — 2026-10-28-hiro-knowledge
 
+Latest continuation — 2026-10-29 AI cards: user approved Cloudflare-hosted generation without PC. Added private generation/status, atomic20/day operational counter, fixed free-compatible Qwen model, draft/edit/save UI, source-excerpt grounding and session cleanup. Node76/76, real local Worker/D1 E2E7, AI mocked UI6 and auth UI4 passed. Real Cloudflare inference + isolated D1 and production owner browser generation/edit/save/reload passed; anonymous/forgedAI401; mobile390 no overflow; physical phone untested. AI QA note archived, existing history preserved. Current operations and evidence are docs/ai-cards.md; earlier entries below are historical stages.
+
 Task 1: clone and branch complete. Upstream main has zero files and one initial commit. No existing news behavior to alter.
 Ruling: use standalone vanilla ESM app — no existing framework to preserve, fewer dependencies.
 Ruling: user explicitly opted out of questions/approval waits — proceed autonomously within free resources and verified private deployment.
