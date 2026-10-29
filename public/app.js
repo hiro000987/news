@@ -5,11 +5,57 @@ const button = (text, action, cls='secondary') => { const b=el('button',text,cls
 const state={page:'home',offset:0,limit:20,meta:{categories:[],tags:[]},review:null,quiz:null,selected:null,revealed:false,key:null};
 const pages=[['home','⌂','ホーム'],['knowledge','▤','知識'],['review','◷','復習'],['analytics','▥','分析']];
 const statusLabels={new:'未学習',due:'復習予定',mastered:'習得の目安',archived:'アーカイブ'};
-async function api(path, options={}) { const opts={...options,headers:{...options.headers}}; if(options.body && typeof options.body !== 'string'){opts.body=JSON.stringify(options.body);opts.headers['Content-Type']='application/json'} const r=await fetch(path,opts); let data; try{data=await r.json()}catch{throw new Error('サーバーからの応答を読み取れませんでした。')} if(!r.ok){const error=new Error(data.error || `通信エラー (${r.status})`);error.status=r.status;error.code=data.code;throw error;} return data; }
+let authMode='loading', authClient=null, authReady=false, sessionVersion=0, requestController=new AbortController(), currentUid=null;
+function resetSession(){
+  sessionVersion++; requestController.abort(); requestController=new AbortController();
+  state.review=null; state.quiz=null; state.response=''; state.selected=null; state.key=null; state.revealed=false; state.q=''; state.category=''; state.tag=''; state.status=''; state.offset=0; state.meta={categories:[],tags:[]};
+  if ($('#modal').open) $('#modal').close();
+  returnFocus=null; $('#modal-content').replaceChildren();
+  $('#view').replaceChildren();
+  clearTimeout(toast.timer); $('#toast').textContent=''; $('#toast').classList.remove('show');
+}
+function showLogin(message='ログインすると、あなたの知識を安全に開けます。', retryAccount=false){
+  authReady=false; resetSession();
+  document.body.classList.add('auth-locked'); $('#logout-button').hidden=true; $('#page-title').textContent='ログイン';
+  const panel=el('div',null,'panel login-panel');
+  add(panel,el('span','HIRO KNOWLEDGE','eyebrow'),el('h2','おかえりなさい'),el('p',message,'muted'));
+  const error=el('p','','error');error.setAttribute('role','alert');
+  const login=button(retryAccount?'別のアカウントでログイン':'Googleでログイン',async()=>{
+    login.disabled=true;error.textContent='';
+    try { if(retryAccount){await authClient.signOut();showLogin('本人の Google アカウントを選んでください。');return;} await authClient.signIn(); }
+    catch(e){error.textContent='ログインできませんでした。ポップアップや通信を確認して、もう一度試してください。';}
+    finally{login.disabled=false}
+  },'primary');
+  add(panel,login,error);$('#view').replaceChildren(panel);
+}
+async function authorizedFetch(path,options={}){
+  const version=sessionVersion, headers=new Headers(options.headers||{});
+  const call=async force=>{
+    if(authMode==='firebase')headers.set('Authorization',`Bearer ${await authClient.getAuthToken(force)}`);
+    if(version!==sessionVersion)throw new Error('ログイン状態が変わりました。');
+    return fetch(path,{...options,headers,signal:requestController.signal});
+  };
+  let r=await call(false);
+  if(authMode==='firebase' && r.status===401 && version===sessionVersion)r=await call(true);
+  if(version!==sessionVersion)throw new Error('ログイン状態が変わりました。');
+  if(authMode==='firebase' && (r.status===401||r.status===403)){
+    showLogin('このアカウントでは利用できません。本人の Google アカウントでログインしてください。',true);
+    throw new Error('本人の Google アカウントでログインしてください。');
+  }
+  return r;
+}
+async function api(path, options={}) {
+  const opts={...options,headers:{...options.headers}};
+  if(options.body && typeof options.body !== 'string'){opts.body=JSON.stringify(options.body);opts.headers['Content-Type']='application/json'}
+  const version=sessionVersion; const r=await authorizedFetch(path,opts); let data;
+  try{data=await r.json()}catch{throw new Error('サーバーからの応答を読み取れませんでした。')}
+  if(version!==sessionVersion)throw new Error('ログイン状態が変わりました。');
+  if(!r.ok){const error=new Error(data.error || `通信エラー (${r.status})`);error.status=r.status;error.code=data.code;throw error;} return data;
+}
 function toast(t){const x=$('#toast');x.textContent=t;x.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>x.classList.remove('show'),3500)}
 function fail(e){toast(e.message || '処理に失敗しました。')}
 function nav(){document.querySelectorAll('.nav').forEach(n=>{n.replaceChildren();for(const [id,icon,label] of pages){const b=button('',()=>go(id),'');const i=el('span',icon,'nav-icon');i.setAttribute('aria-hidden','true');b.setAttribute('aria-label',label);add(b,i,document.createTextNode(label));b.classList.toggle('active',state.page===id);if(state.page===id)b.setAttribute('aria-current','page');n.append(b)}});$('#page-title').textContent=pages.find(p=>p[0]===state.page)[2]}
-async function go(page){state.page=page;nav();$('#view').replaceChildren(el('p','読み込み中…','muted'));try{if(page==='home')await home();if(page==='knowledge')await knowledge();if(page==='review')await review();if(page==='analytics')await analytics()}catch(e){$('#view').replaceChildren(empty('読み込めませんでした',e.message,button('もう一度試す',()=>go(page))))} }
+async function go(page){if(!authReady)return;const version=sessionVersion;state.page=page;nav();$('#view').replaceChildren(el('p','読み込み中…','muted'));try{if(page==='home')await home();if(page==='knowledge')await knowledge();if(page==='review')await review();if(page==='analytics')await analytics()}catch(e){if(version===sessionVersion)$('#view').replaceChildren(empty('読み込めませんでした',e.message,button('もう一度試す',()=>go(page))))} }
 function empty(title,desc,action){const x=el('div',null,'empty');add(x,el('strong',title),el('p',desc),action);return x}
 function card(label,value,sub){const x=el('div',null,'card');add(x,el('span',label,'label'),el('strong',value==null?'—':String(value)),el('span',sub||'','muted'));return x}
 function section(title,action){const x=el('div',null,'section-heading');add(x,el('h2',title),action);return x}
@@ -101,5 +147,43 @@ async function analytics(){
   add(grid,categories,progress,accuracy,weak);add(v,cards,grid);
 }
 function setTheme(value){if(value==='system'){delete document.body.dataset.theme;localStorage.removeItem('hiro-theme')}else{document.body.dataset.theme=value;localStorage.setItem('hiro-theme',value)}}
-function settings(){const body=el('div');const l=el('label','表示テーマ');l.htmlFor='theme';body.append(l);const theme=select('表示テーマ',[['system','システムに合わせる'],['light','ライト'],['dark','ダーク']],localStorage.getItem('hiro-theme')||'system');theme.id='theme';theme.addEventListener('change',()=>setTheme(theme.value));body.append(theme);add(body,el('h3','データの持ち出し'),el('p','バックアップ JSON は復元に使えます。CSV は表計算ソフトで確認できます。','muted'));const exports=el('div',null,'row');for(const [name,path] of [['JSON を出力','/api/backup'],['CSV を出力','/api/export.csv']])exports.append(button(name,async()=>{try{const r=await fetch(path);if(!r.ok){const d=await r.json();throw new Error(d.error||'出力できませんでした')}const blob=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name.startsWith('JSON')?'hiro-knowledge-backup.json':'hiro-knowledge.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast('ファイルを出力しました')}catch(e){fail(e)}}));body.append(exports);add(body,el('h3','JSON から復元'),el('p','先にファイルを検証し、件数と競合を確認します。既存データは一括削除しません。','muted'));const label=el('label','バックアップファイル');label.htmlFor='backup-file';body.append(label);const file=el('input');file.id='backup-file';file.type='file';file.accept='.json,application/json';body.append(file);const preview=el('div');preview.setAttribute('aria-live','polite');body.append(preview);const validate=button('ファイルを検証',async()=>{preview.replaceChildren();if(!file.files[0]){preview.append(el('p','ファイルを選択してください。','error'));return}try{const data=JSON.parse(await file.files[0].text());const result=await api('/api/backup/validate',{method:'POST',body:data});preview.append(el('h3','検証結果'));const counts=el('ul');for(const [key,val] of Object.entries(result.counts||{}))counts.append(el('li',`${key}: ${typeof val==='object'?JSON.stringify(val):val}`));preview.append(counts);const conflicts=result.conflicts||[];preview.append(el('p',`競合: ${Array.isArray(conflicts)?conflicts.length:JSON.stringify(conflicts)}`));if(Array.isArray(conflicts)&&conflicts.length){const ul=el('ul');for(const c of conflicts)ul.append(el('li',typeof c==='string'?c:JSON.stringify(c)));preview.append(ul)}else{const importBtn=button('この内容を復元する',async()=>{importBtn.disabled=true;try{const r=await api('/api/backup/import',{method:'POST',body:data});preview.append(el('p',`復元しました。追加: ${typeof r.imported==='object'?JSON.stringify(r.imported):r.imported}、スキップ: ${typeof r.skipped==='object'?JSON.stringify(r.skipped):r.skipped}`));toast('復元しました')}catch(e){preview.append(el('p',e.message,'error'));importBtn.disabled=false}},'primary');preview.append(importBtn)}}catch(e){preview.append(el('p',e instanceof SyntaxError?'JSON ファイルを読み取れません。':e.message,'error'))}},'danger');body.append(validate);modal('設定',body,[button('閉じる',()=>dialog.close(),'danger')])}
-$('#storage-label').textContent=['localhost','127.0.0.1','[::1]','::1'].includes(location.hostname)?'● ローカル保存':'● 保護されたクラウド';document.querySelectorAll('.settings-open').forEach(b=>b.addEventListener('click',settings));$('#add-button').addEventListener('click',()=>editor());setTheme(localStorage.getItem('hiro-theme')||'system');go('home');const params=new URLSearchParams(location.search);if(params.has('url')||params.has('title')||params.has('summary')){const incoming=params.get('url')||'';editor(null,{url:safeUrl(incoming),title:params.get('title')||'',summary:params.get('summary')||''});history.replaceState(null,'',location.pathname)}
+function settings(){const body=el('div');if(authMode==='firebase')add(body,el('h3','アカウント'),button('ログアウト',()=>$('#logout-button').click(),'danger'));const l=el('label','表示テーマ');l.htmlFor='theme';body.append(l);const theme=select('表示テーマ',[['system','システムに合わせる'],['light','ライト'],['dark','ダーク']],localStorage.getItem('hiro-theme')||'system');theme.id='theme';theme.addEventListener('change',()=>setTheme(theme.value));body.append(theme);add(body,el('h3','データの持ち出し'),el('p','バックアップ JSON は復元に使えます。CSV は表計算ソフトで確認できます。','muted'));const exports=el('div',null,'row');for(const [name,path] of [['JSON を出力','/api/backup'],['CSV を出力','/api/export.csv']])exports.append(button(name,async()=>{try{const version=sessionVersion;const r=await authorizedFetch(path);if(!r.ok){const d=await r.json();throw new Error(d.error||'出力できませんでした')}const blob=await r.blob();if(version!==sessionVersion)throw new Error('ログイン状態が変わりました。');const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name.startsWith('JSON')?'hiro-knowledge-backup.json':'hiro-knowledge.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast('ファイルを出力しました')}catch(e){fail(e)}}));body.append(exports);add(body,el('h3','JSON から復元'),el('p','先にファイルを検証し、件数と競合を確認します。既存データは一括削除しません。','muted'));const label=el('label','バックアップファイル');label.htmlFor='backup-file';body.append(label);const file=el('input');file.id='backup-file';file.type='file';file.accept='.json,application/json';body.append(file);const preview=el('div');preview.setAttribute('aria-live','polite');body.append(preview);const validate=button('ファイルを検証',async()=>{preview.replaceChildren();if(!file.files[0]){preview.append(el('p','ファイルを選択してください。','error'));return}try{const data=JSON.parse(await file.files[0].text());const result=await api('/api/backup/validate',{method:'POST',body:data});preview.append(el('h3','検証結果'));const counts=el('ul');for(const [key,val] of Object.entries(result.counts||{}))counts.append(el('li',`${key}: ${typeof val==='object'?JSON.stringify(val):val}`));preview.append(counts);const conflicts=result.conflicts||[];preview.append(el('p',`競合: ${Array.isArray(conflicts)?conflicts.length:JSON.stringify(conflicts)}`));if(Array.isArray(conflicts)&&conflicts.length){const ul=el('ul');for(const c of conflicts)ul.append(el('li',typeof c==='string'?c:JSON.stringify(c)));preview.append(ul)}else{const importBtn=button('この内容を復元する',async()=>{importBtn.disabled=true;try{const r=await api('/api/backup/import',{method:'POST',body:data});preview.append(el('p',`復元しました。追加: ${typeof r.imported==='object'?JSON.stringify(r.imported):r.imported}、スキップ: ${typeof r.skipped==='object'?JSON.stringify(r.skipped):r.skipped}`));toast('復元しました')}catch(e){preview.append(el('p',e.message,'error'));importBtn.disabled=false}},'primary');preview.append(importBtn)}}catch(e){preview.append(el('p',e instanceof SyntaxError?'JSON ファイルを読み取れません。':e.message,'error'))}},'danger');body.append(validate);modal('設定',body,[button('閉じる',()=>dialog.close(),'danger')])}
+function openSharedDraft(){
+  const params=new URLSearchParams(location.search);
+  if(params.has('url')||params.has('title')||params.has('summary')){
+    const incoming=params.get('url')||'';
+    editor(null,{url:safeUrl(incoming),title:params.get('title')||'',summary:params.get('summary')||''});
+    history.replaceState(null,'',location.pathname);
+  }
+}
+function enterApp(){
+  authReady=true;document.body.classList.remove('auth-locked');
+  $('#logout-button').hidden=authMode!=='firebase';
+  $('#storage-label').textContent=authMode==='local'?'● ローカル保存':'● 保護されたクラウド';
+  go('home');openSharedDraft();
+}
+async function bootstrapAuth(){
+  document.body.classList.add('auth-locked');$('#view').replaceChildren(el('p','ログイン状態を確認中…','muted'));
+  try{
+    const response=await fetch('/api/auth/config',{cache:'no-store'});
+    if(!response.ok)throw new Error('認証設定を確認できません。管理者が設定を確認してください。');
+    const config=await response.json();authMode=config.mode;
+    if(authMode==='local'||authMode==='access'){enterApp();return;}
+    if(authMode!=='firebase'||!config.firebase?.apiKey||!config.firebase?.authDomain||!config.firebase?.projectId||!config.firebase?.appId)throw new Error('Google ログインの設定が不足しています。');
+    authClient=await import('/auth-client.js');
+    await authClient.initializeAuth(config.firebase,user=>{
+      if(user && typeof user.uid==='string' && user.uid){
+        if(currentUid!==user.uid){authReady=false;resetSession();currentUid=user.uid;}
+        if(!authReady)enterApp();
+      } else {currentUid=null;showLogin();}
+    });
+  }catch(e){
+    authReady=false;resetSession();document.body.classList.add('auth-locked');
+    $('#page-title').textContent='ログイン';
+    $('#view').replaceChildren(empty('ログインを準備できません',e.message,button('もう一度試す',bootstrapAuth)));
+  }
+}
+document.querySelectorAll('.settings-open').forEach(b=>b.addEventListener('click',settings));
+$('#add-button').addEventListener('click',()=>editor());
+$('#logout-button').addEventListener('click',async()=>{authReady=false;resetSession();document.body.classList.add('auth-locked');$('#page-title').textContent='ログアウト';$('#view').replaceChildren(el('p','ログアウト中…','muted'));try{await authClient.signOut();showLogin('ログアウトしました。')}catch(e){showLogin('ログアウトできませんでした。もう一度試してください。',true)}});
+setTheme(localStorage.getItem('hiro-theme')||'system');bootstrapAuth();

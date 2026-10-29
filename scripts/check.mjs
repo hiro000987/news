@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-const files = ['src','public','scripts','tests'].flatMap(dir=>readdirSync(dir).filter(x=>/\.(js|mjs)$/.test(x)).map(x=>dir+'/'+x));
+const files = ['src','public','client','scripts','tests'].flatMap(dir=>readdirSync(dir).filter(x=>/\.(js|mjs)$/.test(x)).map(x=>dir+'/'+x));
 let failed=false;
 for(const file of files){
   const run=spawnSync(process.execPath,['--check',file],{encoding:'utf8'});

@@ -2,11 +2,13 @@
 
 日本語の個人用知識ノートと復習アプリ。登録 → 自力で思い出す → 答えを確認 → 自己評価 → 次回復習をひとつの画面で進める。
 
-現在は **ローカル利用版**。2026-10-29にD1権限の再認証と一覧取得まで成功した。無料プランの実状態とAccess設定は未確認のため、クラウドDB作成と本番公開は保留している。PCとスマホのクラウド同期、実際のAccessログインはまだ確認していない。安全条件を満たす前に個人データを公開しない。
+**クラウド版を公開済み**。[Hiro Knowledgeを開く](https://hiro-knowledge.aprintingmachinehiro.workers.dev/) で本人のGoogleアカウントにログインする。知識と復習履歴は専用Cloudflare D1へ保存する。2026-10-29にユーザー承認のうえ認証をFirebase Sparkへ変更し、カード登録なしで構成した。実環境の保存・復習・バックアップ・未認証拒否まで確認済み。実スマホ端末での確認は残る。
 
 ## 今すぐ使う
 
-Windowsで **`Start-App.cmd` をダブルクリック**。ブラウザーで [Hiro Knowledge](http://127.0.0.1:8787/) が開く。
+PC・スマホで上のクラウドURLを開く。デスクトップの **Hiro Knowledge** もクラウド版を開く。
+
+PC内だけで使うローカル版は **`Start-App.cmd`** または **Hiro Knowledge（ローカル）** から起動。[ローカル版](http://127.0.0.1:8787/) はクラウドとは別データベースで、既存データを自動移動しない。
 
 初回はローカルDBを準備し、以降のデータは `.wrangler/state/` に保存する。ブラウザーを閉じてもデータは残る。`.wrangler/state` を削除するとローカルDBを失うため、先に設定からJSONを出力しておく。
 
@@ -76,16 +78,18 @@ E2Eは8791/8792ポートと固有の `.wrangler/e2e-*` DBを使い、通常利�
 
 ## Cloudflare公開
 
-まず [標準URLでの安全な公開](docs/cloud-deployment.md) を読む。ドメインを購入せず、Cloudflare標準URLにWorker単位のAccessを適用する。専用D1、本人メールの完全一致Allow、署名付きJWT検証を設定して進める。
+現在の構成・再デプロイ手順は [Google本人ログインでの公開](docs/firebase-auth.md) を読む。Cloudflare Accessの申込条件がカードと超過課金同意を含んだため、ユーザー承認でFirebase Sparkへ変更した。従来Access向けの記録は `docs/cloud-deployment.md` に残す。
 
-本番設定はGit管理外の `wrangler.production.json`。`OWNER_EMAIL` はCloudflare Secretを使用し、メールやトークンをコード・コミットへ入れない。最初の設定ではworkers.devとpreview URLを無効化している。自分が管理できるAccess保護ホストを使う。
+本番設定はGit管理外の `wrangler.production.json`。`OWNER_EMAIL` はCloudflare Secretを使用し、メールやトークンをコード・コミットへ入れない。承認済みのGoogle認証を使ってworkers.devを有効化し、preview URLは無効にしている。
 
-このアプリはHTML/JS/CSS/APIのすべてを先にWorker認証へ通す。Access JWTの署名、issuer、AUD、メールを検証し、認証設定がない場合は503、未認証は401、別Originの書込は403で拒否する。公開前チェックはAccessの設定・無料プランを実確認した記録を求めるが、記録ファイルだけで安全性を証明するものではない。
+Firebaseモードではログイン画面とWeb設定だけが公開される。知識・復習・分析・バックアップAPIはFirebase JWTの署名、issuer、対象プロジェクト、有効期限、Googleログイン、確認済み本人メールを検証する。設定不足は503、未認証は401、別Originの書込は403。従来のAccessモードも保持する。公開前チェックの記録を実環境確認の代わりにはしない。
 
-追加の月額契約・有料APIは使用しない。実際のアカウントの無料プランと他プロジェクトとの合算使用量は公開前に確認する。[公式D1料金](https://developers.cloudflare.com/d1/platform/pricing/)、[公式Workers料金](https://developers.cloudflare.com/workers/platform/pricing/) を参照。
+追加の月額契約・有料APIは使用しない。Workers Freeの制限表示とFirebase Spark（月額0ドル）を実画面で確認した。他プロジェクトとの合算使用量・無料枠上限には従う。[公式D1料金](https://developers.cloudflare.com/d1/platform/pricing/)、[公式Workers料金](https://developers.cloudflare.com/workers/platform/pricing/) を参照。
+
+本番動作確認用のノート1件はアーカイブ済み。分析の復習回数・学習日にはこのテスト1回が含まれる。
 
 ## ファイル
 
-`src/index.js` が認証・安全なレスポンス、`src/auth.js` がAccess、`src/api.js` がAPI、`src/validation.js` が入力検証、`src/backup.js` が復元、`src/scheduler.js` が復習計算を担当する。`migrations/` にDB定義、`public/` に画面、`tests/` に検証、`docs/` に設計と実証結果を置く。
+`src/index.js` が認証・安全なレスポンス、`src/auth.js` が本人認証、`src/api.js` がAPI、`src/validation.js` が入力検証、`src/backup.js` が復元、`src/scheduler.js` が復習計算を担当する。`migrations/` にDB定義、`public/` に画面、`tests/` に検証、`docs/` に設計と実証結果を置く。
 
 もとの `news` は空の初期コミットだったため、既存ニュース機能・既存DB・既読情報への変更はない。Hiro Memory / Supabaseには接続・変更していない。

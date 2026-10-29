@@ -4,18 +4,22 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --ip 127.0.0.1 --port 8787 --persist-to .wrangler/state",
+    "build": "node scripts/build-auth.mjs",
+    "dev": "node scripts/build-auth.mjs && wrangler dev --ip 127.0.0.1 --port 8787 --persist-to .wrangler/state",
     "db:local": "wrangler d1 migrations apply hiro-knowledge --local --persist-to .wrangler/state",
     "test": "node --test tests/*.test.js",
-    "test:e2e": "node tests/e2e.mjs",
+    "test:e2e": "node scripts/build-auth.mjs && node tests/e2e.mjs",
+    "test:auth-ui": "node tests/auth-ui.mjs",
     "check": "node scripts/check.mjs",
     "deploy:check": "node scripts/deploy-check.mjs",
-    "deploy": "node scripts/deploy-check.mjs --config wrangler.production.json && wrangler deploy --config wrangler.production.json"
+    "deploy": "node scripts/deploy-check.mjs --config wrangler.production.json && node scripts/build-auth.mjs && wrangler deploy --config wrangler.production.json"
   },
   "dependencies": {
+    "firebase": "13.1.0",
     "jose": "6.2.13"
   },
   "devDependencies": {
+    "esbuild": "0.28.2",
     "miniflare": "4.20260730.0",
     "playwright": "1.64.1",
     "wrangler": "4.153.0"

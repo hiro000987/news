@@ -16,6 +16,8 @@ export function validateDeployment(c, proof, { now = Date.now(), mode = 'product
   if (!Array.isArray(db) || db.length !== 1 || !UUID.test(db[0]?.database_id || '')) reject('専用D1の有効なIDが必要。');
   const vars = c.vars || {};
   if (Object.hasOwn(vars,'LOCAL_DEV') || Object.hasOwn(vars,'OWNER_EMAIL')) reject('LOCAL_DEVとOWNER_EMAILを公開設定に含められません。');
+  const provider = vars.AUTH_PROVIDER || 'access';
+  if (!['access','firebase'].includes(provider)) reject('認証方式が正しくない。');
   const timestamp = Date.parse(proof.checkedAt), current = Number(now), age = current - timestamp;
   if (proof.freePlan !== true || !Number.isFinite(age) || age > DAY || age < -300000) reject('24時間以内の無料プラン確認記録が必要。');
   if (Object.hasOwn(c, 'route')) reject('単数のroute設定は使用できません。');
@@ -25,14 +27,22 @@ export function validateDeployment(c, proof, { now = Date.now(), mode = 'product
     if (c.workers_dev !== false || routes.length !== 0) reject('準備段階では公開URLとルートを無効にしてください。');
     return;
   }
-  const domain = vars.ACCESS_TEAM_DOMAIN;
-  if (!present(domain) || !/^(?:https:\/\/)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.cloudflareaccess\.com\/?$/.test(domain) || !present(vars.ACCESS_AUD)) reject('Accessのチームドメインとaudienceが必要。');
-  if (proof.accessAppVerified !== true || proof.ownerOnlyPolicy !== true || proof.authSecretsVerified !== true || !present(proof.accessAppId) || proof.accessAudience !== vars.ACCESS_AUD || proof.teamDomain !== domain) reject('Accessアプリ、本人のみのポリシー、認証情報の確認記録が必要。');
   const host = proof.productionHost;
   if (!present(host) || !HOST.test(host)) reject('公開先はワイルドカードやパスを含まないホスト名が必要。');
   if (c.workers_dev === true) {
-    if (routes.length !== 0 || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(proof.workerSubdomain || '') || host !== `${c.name}.${proof.workerSubdomain}.workers.dev` || proof.accessDestinationType !== 'worker' || !workerId(proof.workerId) || proof.workerId !== proof.accessDestinationWorkerId) reject('workers.devにはWorker単位のAccess保護と確認記録が必要。');
+    if (routes.length !== 0 || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(proof.workerSubdomain || '') || host !== `${c.name}.${proof.workerSubdomain}.workers.dev` || !workerId(proof.workerId)) reject('workers.devのホストとWorker確認記録が必要。');
+    if (provider === 'access' && (proof.accessDestinationType !== 'worker' || proof.workerId !== proof.accessDestinationWorkerId)) reject('workers.devにはWorker単位のAccess保護が必要。');
   } else if (c.workers_dev === false) {
     if (routes.length !== 1 || typeof routes[0] !== 'object' || routes[0] === null || routes[0].pattern !== host || host.endsWith('.workers.dev')) reject('確認済みの単一カスタムホストが必要。');
   } else reject('公開先の設定が正しくない。');
+  if (provider === 'firebase') {
+    const project = vars.FIREBASE_PROJECT_ID;
+    const domain = vars.FIREBASE_AUTH_DOMAIN;
+    if (typeof project !== 'string' || !/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(project) || domain !== `${project}.firebaseapp.com` || typeof vars.FIREBASE_API_KEY !== 'string' || !/^[A-Za-z0-9_-]{10,256}$/.test(vars.FIREBASE_API_KEY) || typeof vars.FIREBASE_APP_ID !== 'string' || !/^1:\d+:web:[a-f0-9]+$/i.test(vars.FIREBASE_APP_ID)) reject('Firebase設定が正しくない。');
+    if (proof.authProvider !== 'firebase' || proof.firebaseSparkVerified !== true || proof.googleProviderVerified !== true || proof.authorizedDomainVerified !== true || proof.authSecretsVerified !== true || proof.ownerOnlyPolicy !== true || proof.firebaseProjectId !== project || proof.firebaseAuthDomain !== domain || proof.authorizedDomain !== host) reject('Firebaseの無料プラン、Googleログイン、本人設定と許可ドメインの確認記録が必要。');
+  } else {
+    const domain = vars.ACCESS_TEAM_DOMAIN;
+    if (!present(domain) || !/^(?:https:\/\/)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.cloudflareaccess\.com\/?$/.test(domain) || !present(vars.ACCESS_AUD)) reject('Accessのチームドメインとaudienceが必要。');
+    if (proof.accessAppVerified !== true || proof.ownerOnlyPolicy !== true || proof.authSecretsVerified !== true || !present(proof.accessAppId) || proof.accessAudience !== vars.ACCESS_AUD || proof.teamDomain !== domain) reject('Accessアプリ、本人のみのポリシー、認証情報の確認記録が必要。');
+  }
 }

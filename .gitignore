@@ -9,3 +9,5 @@ artifacts/
 .superpowers/
 *.log
 wrangler.production.json
+public/auth-client.js
+public/firebase-license.txt

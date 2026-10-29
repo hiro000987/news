@@ -1,5 +1,7 @@
 # 標準URLでの安全な公開 — 2026-10-29
 
+最終更新: Free checkoutのカード・超過課金同意を避けるため、ユーザー承認でFirebase Spark認証へ変更した。現在の手順は [Google本人ログインでの公開](firebase-auth.md)。以下はAccess方式の準備段階記録。
+
 ## 現在の実測状態
 
 - Wranglerの再ログインを本人が完了し、D1一覧取得が成功した。
