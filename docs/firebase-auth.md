@@ -1,5 +1,11 @@
 # Google本人ログインでの公開 — 2026-10-29
 
+## Android Chromeでのログイン報告 — 2026-10-29
+
+本人からスマホのChromeでGoogleログインが汎用エラーになるとの報告があった。実機のFirebaseエラーコードは取得できていなかったため、許可した6種類の `auth/...` コードだけを固定説明付きで表示する修正を公開。未知のコードは `auth/unknown` とし、生のmessage、stack、customData、URL、認証情報は表示しない。認証画面テスト5項目が成功した。
+
+更新後、本人がAndroid Chromeで再読み込み・再試行し「ログインできた」と報告した。ログイン処理自体は今回変更していないため、直接の失敗原因は未特定。実機で確認されたのはログイン成功で、AI生成や保存までの実機確認とは分ける。新しいGoogle OAuth callback追加や同一オリジン認証proxyは、この対応では設定・公開していない。
+
 ## 採用した構成
 
 公開先: https://hiro-knowledge.aprintingmachinehiro.workers.dev/

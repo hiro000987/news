@@ -16,6 +16,19 @@ function resetSession(){
   $('#view').replaceChildren();
   clearTimeout(toast.timer); $('#toast').textContent=''; $('#toast').classList.remove('show');
 }
+function loginErrorMessage(error){
+  const messages=new Map([
+    ['auth/popup-blocked','ポップアップがブロックされました。ブラウザの設定を確認してください。'],
+    ['auth/popup-closed-by-user','ログイン画面が閉じられました。もう一度お試しください。'],
+    ['auth/network-request-failed','通信できませんでした。インターネット接続を確認してください。'],
+    ['auth/unauthorized-domain','ログインに使うサイトの設定を確認してください。'],
+    ['auth/web-storage-unsupported','ブラウザの保存機能を利用できません。ブラウザの設定を確認してください。'],
+    ['auth/operation-not-supported-in-this-environment','このブラウザ環境ではログインできません。通常のブラウザで開いてください。']
+  ]);
+  let code;try{code=error?.code}catch{code=null}
+  if(!messages.has(code))return 'ログインできませんでした。もう一度お試しください。（確認コード: auth/unknown）';
+  return `${messages.get(code)}（確認コード: ${code}）`;
+}
 function showLogin(message='ログインすると、あなたの知識を安全に開けます。', retryAccount=false){
   authReady=false; resetSession();
   document.body.classList.add('auth-locked'); $('#logout-button').hidden=true; $('#page-title').textContent='ログイン';
@@ -25,7 +38,7 @@ function showLogin(message='ログインすると、あなたの知識を安全�
   const login=button(retryAccount?'別のアカウントでログイン':'Googleでログイン',async()=>{
     login.disabled=true;error.textContent='';
     try { if(retryAccount){await authClient.signOut();showLogin('本人の Google アカウントを選んでください。');return;} await authClient.signIn(); }
-    catch(e){error.textContent='ログインできませんでした。ポップアップや通信を確認して、もう一度試してください。';}
+    catch(e){error.textContent=loginErrorMessage(e);}
     finally{login.disabled=false}
   },'primary');
   add(panel,login,error);$('#view').replaceChildren(panel);
