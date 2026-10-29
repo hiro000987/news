@@ -138,6 +138,27 @@ try{
     await page.getByText(unsafe,{exact:true}).waitFor();assert.equal(await page.evaluate(()=>window.hacked),undefined);
     const r=await fetch(primary.base+'/api/knowledge',{method:'POST',headers:{Origin:'https://evil.test','Content-Type':'application/json'},body:JSON.stringify({title:'bad',content:'bad'})});assert.equal(r.status,403);
   });
+  await check('one generated batch saves three reviewed candidates through real Worker and D1 without regeneration',async()=>{
+    const candidates=Array.from({length:3},(_,i)=>({title:`連続保存テスト${i+1}`,content:`候補${i+1}の内容`,category:'E2E',tags:['AI候補'],sourceUrl:'',notes:'AI生成・未検証\n参考URL: https://example.com/reader',understanding:0,quizzes:[{type:'recall',prompt:`質問${i+1}`,answer:`答え${i+1}`,explanation:'',options:[],correctIndex:null}]}));
+    let generations=0;
+    await page.route('**/api/ai/status',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({available:true,model:'test-provider',dailyLimit:20,remainingCalls:19})}));
+    await page.route('**/api/ai/generate',route=>{generations++;return route.fulfill({contentType:'application/json',body:JSON.stringify({candidates,model:'test-provider',mode:'topic',generatedAt:new Date().toISOString(),remainingCalls:18})})});
+    const before=(await json(primary.base,'/api/knowledge')).total;
+    await page.getByRole('button',{name:'AIでカード作成',exact:true}).click();
+    await page.getByLabel('テーマ',{exact:true}).fill('データ構造');await page.getByLabel('候補数',{exact:true}).selectOption('3');
+    await page.getByRole('button',{name:'候補を作成',exact:true}).click();await page.locator('.ai-candidate').nth(2).waitFor();
+    assert.equal((await json(primary.base,'/api/knowledge')).total,before);
+    for(let i=0;i<3;i++){
+      await page.getByRole('button',{name:'この候補を編集',exact:true}).first().click();
+      await page.getByRole('button',{name:'保存する',exact:true}).click();await page.getByText('保存済み',{exact:true}).nth(i).waitFor();
+      assert.equal((await json(primary.base,'/api/knowledge')).total,before+i+1);
+    }
+    assert.equal(generations,1);assert.equal(await page.getByRole('button',{name:'この候補を編集',exact:true}).count(),0);
+    await page.getByRole('dialog').getByRole('button',{name:'閉じる',exact:true}).last().click();await page.getByRole('dialog').waitFor({state:'hidden'});
+    await page.getByRole('button',{name:'連続保存テスト3 の詳細',exact:true}).waitFor();
+    const saved=(await json(primary.base,'/api/knowledge?q=連続保存テスト')).items;assert.equal(saved.length,3);assert.ok(saved.every(item=>item.quizzes.length===1&&item.notes.includes('https://example.com/reader')));
+    await page.unroute('**/api/ai/status');await page.unroute('**/api/ai/generate');
+  });
   await page.getByRole('button',{name:'ホーム',exact:true}).click();await page.getByRole('heading',{name:'今日の学びを、明日の力へ。'}).waitFor();
   await page.screenshot({path:path.join(outputs,'desktop.png'),fullPage:true});
   assert.deepEqual(errors,[]);assert.deepEqual(csp,[]);
