@@ -2,7 +2,7 @@
 
 日本語の個人用知識ノートと復習アプリ。登録 → 自力で思い出す → 答えを確認 → 自己評価 → 次回復習をひとつの画面で進める。
 
-**クラウド版を公開済み**。[Hiro Knowledgeを開く](https://hiro-knowledge.aprintingmachinehiro.workers.dev/) で本人のGoogleアカウントにログインする。知識と復習履歴は専用Cloudflare D1へ保存する。2026-10-29にユーザー承認のうえ認証をFirebase Sparkへ変更し、カード登録なしで構成した。実環境の保存・復習・バックアップ・未認証拒否まで確認済み。Android Chromeのログインは本人の実機成功報告あり。AI生成・保存・復習の実機通し確認は残る。
+**クラウド版を公開済み**。[Hiro Knowledgeを開く](https://hiro-knowledge.aprintingmachinehiro.workers.dev/) で本人のGoogleアカウントにログインする。知識と復習履歴は専用Cloudflare D1へ保存する。2026-10-29にユーザー承認のうえ認証をFirebase Sparkへ変更し、カード登録なしで構成した。実環境の保存・復習・バックアップ・未認証拒否まで確認済み。Android Chromeではログイン・AI生成・保存・復習まで本人の実機成功報告あり。PCとの同一データ照合とiPhoneは未確認。
 
 ## 今すぐ使う
 
